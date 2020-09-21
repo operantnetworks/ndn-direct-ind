@@ -276,7 +276,6 @@ def build (bld):
                  "js/lp/incoming-face-id.js",
                  "js/lp/lp-packet.js",
                  "js/face.js",
-                 "js/firefly-face.js",
                  "js/browserify-footer.js",
                  "contrib/dexie/Dexie.js"]
 
