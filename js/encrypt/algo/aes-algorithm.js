@@ -24,8 +24,6 @@
 /** @ignore */
 var Crypto = require('../../crypto.js'); /** @ignore */
 var Blob = require('../../util/blob.js').Blob; /** @ignore */
-var DecryptKey = require('../decrypt-key.js').DecryptKey; /** @ignore */
-var EncryptKey = require('../encrypt-key.js').EncryptKey; /** @ignore */
 var EncryptAlgorithmType = require('./encrypt-params.js').EncryptAlgorithmType; /** @ignore */
 var UseSubtleCrypto = require('../../use-subtle-crypto-node.js').UseSubtleCrypto; /** @ignore */
 var SyncPromise = require('../../util/sync-promise.js').SyncPromise;
@@ -41,30 +39,6 @@ var AesAlgorithm = function AesAlgorithm()
 };
 
 exports.AesAlgorithm = AesAlgorithm;
-
-/**
- * Generate a new random decrypt key for AES based on the given params.
- * @param {AesKeyParams} params The key params with the key size (in bits).
- * @return {DecryptKey} The new decrypt key.
- */
-AesAlgorithm.generateKey = function(params)
-{
-  // Convert the key bit size to bytes.
-  var key = Crypto.randomBytes(params.getKeySize() / 8);
-
-  var decryptKey = new DecryptKey(new Blob(key, false));
-  return decryptKey;
-};
-
-/**
- * Derive a new encrypt key from the given decrypt key value.
- * @param {Blob} keyBits The key value of the decrypt key.
- * @return {EncryptKey} The new encrypt key.
- */
-AesAlgorithm.deriveEncryptKey = function(keyBits)
-{
-  return new EncryptKey(keyBits);
-};
 
 /**
  * Decrypt the encryptedData using the keyBits according the encrypt params.
