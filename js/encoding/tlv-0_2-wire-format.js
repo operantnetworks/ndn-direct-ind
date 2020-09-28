@@ -660,68 +660,6 @@ Tlv0_2WireFormat.prototype.decodeDelegationSet = function
 };
 
 /**
- * Encode the EncryptedContent v1 in NDN-TLV and return the encoding.
- * @param {EncryptedContent} encryptedContent The EncryptedContent object to
- * encode.
- * @return {Blob} A Blob containing the encoding.
- */
-Tlv0_2WireFormat.prototype.encodeEncryptedContent = function(encryptedContent)
-{
-  var encoder = new TlvEncoder(256);
-  var saveLength = encoder.getLength();
-
-  // Encode backwards.
-  encoder.writeBlobTlv
-    (Tlv.Encrypt_EncryptedPayload, encryptedContent.getPayload().buf());
-  encoder.writeOptionalBlobTlv
-    (Tlv.Encrypt_InitialVector, encryptedContent.getInitialVector().buf());
-  // Assume the algorithmType value is the same as the TLV type.
-  encoder.writeNonNegativeIntegerTlv
-    (Tlv.Encrypt_EncryptionAlgorithm, encryptedContent.getAlgorithmType());
-  Tlv0_2WireFormat.encodeKeyLocator
-    (Tlv.KeyLocator, encryptedContent.getKeyLocator(), encoder);
-
-  encoder.writeTypeAndLength
-    (Tlv.Encrypt_EncryptedContent, encoder.getLength() - saveLength);
-
-  return new Blob(encoder.getOutput(), false);
-};
-
-/**
- * Decode input as an EncryptedContent v1 in NDN-TLV and set the fields of the
- * encryptedContent object.
- * @param {EncryptedContent} encryptedContent The EncryptedContent object
- * whose fields are updated.
- * @param {Buffer} input The buffer with the bytes to decode.
- * @param {boolean} copy (optional) If true, copy from the input when making new
- * Blob values. If false, then Blob values share memory with the input, which
- * must remain unchanged while the Blob values are used. If omitted, use true.
- */
-Tlv0_2WireFormat.prototype.decodeEncryptedContent = function
-  (encryptedContent, input, copy)
-{
-  if (copy == null)
-    copy = true;
-
-  var decoder = new TlvDecoder(input);
-  var endOffset = decoder.
-    readNestedTlvsStart(Tlv.Encrypt_EncryptedContent);
-
-  encryptedContent.clear();
-  Tlv0_2WireFormat.decodeKeyLocator
-    (Tlv.KeyLocator, encryptedContent.getKeyLocator(), decoder, copy);
-  encryptedContent.setAlgorithmType
-    (decoder.readNonNegativeIntegerTlv(Tlv.Encrypt_EncryptionAlgorithm));
-  encryptedContent.setInitialVector
-    (new Blob(decoder.readOptionalBlobTlv
-     (Tlv.Encrypt_InitialVector, endOffset), copy));
-  encryptedContent.setPayload
-    (new Blob(decoder.readBlobTlv(Tlv.Encrypt_EncryptedPayload), copy));
-
-  decoder.finishNestedTlvs(endOffset);
-};
-
-/**
  * Encode the EncryptedContent v2 (used in Name-based Access Control v2) in
  * NDN-TLV and return the encoding.
  * @param {EncryptedContent} encryptedContent The EncryptedContent object to
