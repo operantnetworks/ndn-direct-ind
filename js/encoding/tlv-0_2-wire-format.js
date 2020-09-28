@@ -37,7 +37,6 @@ var HmacWithSha256Signature = require('../hmac-with-sha256-signature.js').HmacWi
 var DigestSha256Signature = require('../digest-sha256-signature.js').DigestSha256Signature; /** @ignore */
 var ControlParameters = require('../control-parameters.js').ControlParameters; /** @ignore */
 var NetworkNack = require('../network-nack.js').NetworkNack; /** @ignore */
-var Schedule = require('../encrypt/schedule.js').Schedule; /** @ignore */
 var IncomingFaceId = require('../lp/incoming-face-id.js').IncomingFaceId; /** @ignore */
 var CongestionMark = require('../lp/congestion-mark.js').CongestionMark; /** @ignore */
 var DecodingException = require('./decoding-exception.js').DecodingException;
@@ -1080,9 +1079,9 @@ Tlv0_2WireFormat.encodeValidityPeriod_ = function(validityPeriod, encoder)
 
   // Encode backwards.
   encoder.writeBlobTlv(Tlv.ValidityPeriod_NotAfter,
-    new Blob(Schedule.toIsoString(validityPeriod.getNotAfter())).buf());
+    new Blob(WireFormat.toIsoString(validityPeriod.getNotAfter())).buf());
   encoder.writeBlobTlv(Tlv.ValidityPeriod_NotBefore,
-    new Blob(Schedule.toIsoString(validityPeriod.getNotBefore())).buf());
+    new Blob(WireFormat.toIsoString(validityPeriod.getNotBefore())).buf());
 
   encoder.writeTypeAndLength
     (Tlv.ValidityPeriod_ValidityPeriod, encoder.getLength() - saveLength);
@@ -1097,10 +1096,10 @@ Tlv0_2WireFormat.decodeValidityPeriod_ = function(validityPeriod, decoder)
   // Set copy false since we just immediately get the string.
   var isoString = new Blob
     (decoder.readBlobTlv(Tlv.ValidityPeriod_NotBefore), false);
-  var notBefore = Schedule.fromIsoString(isoString.toString());
+  var notBefore = WireFormat.fromIsoString(isoString.toString());
   isoString = new Blob
     (decoder.readBlobTlv(Tlv.ValidityPeriod_NotAfter), false);
-  var notAfter = Schedule.fromIsoString(isoString.toString());
+  var notAfter = WireFormat.fromIsoString(isoString.toString());
 
   validityPeriod.setPeriod(notBefore, notAfter);
 

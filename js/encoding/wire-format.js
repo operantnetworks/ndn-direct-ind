@@ -375,6 +375,54 @@ WireFormat.getDefaultWireFormat = function()
   return WireFormat.defaultWireFormat;
 };
 
+/**
+ * Convert a UNIX timestamp to ISO time representation with the "T" in the middle.
+ * @param {number} msSince1970 Timestamp as milliseconds since Jan 1, 1970 UTC.
+ * @return {string} The string representation.
+ */
+WireFormat.toIsoString = function(msSince1970)
+{
+  var utcTime = new Date(Math.round(msSince1970));
+  return utcTime.getUTCFullYear() +
+         WireFormat.to2DigitString(utcTime.getUTCMonth() + 1) +
+         WireFormat.to2DigitString(utcTime.getUTCDate()) +
+         "T" +
+         WireFormat.to2DigitString(utcTime.getUTCHours()) +
+         WireFormat.to2DigitString(utcTime.getUTCMinutes()) +
+         WireFormat.to2DigitString(utcTime.getUTCSeconds());
+};
+
+/**
+ * A private method to zero pad an integer to 2 digits.
+ * @param {number} x The number to pad.  Assume it is a non-negative integer.
+ * @return {string} The padded string.
+ */
+WireFormat.to2DigitString = function(x)
+{
+  var result = x.toString();
+  return result.length === 1 ? "0" + result : result;
+};
+
+/**
+ * Convert an ISO time representation with the "T" in the middle to a UNIX
+ * timestamp.
+ * @param {string} timeString The ISO time representation.
+ * @return {number} The timestamp as milliseconds since Jan 1, 1970 UTC.
+ */
+WireFormat.fromIsoString = function(timeString)
+{
+  if (timeString.length != 15 || timeString.substr(8, 1) != 'T')
+    throw new Error("fromIsoString: Format is not the expected yyyymmddThhmmss");
+
+  return Date.UTC
+    (parseInt(timeString.substr(0, 4)),
+     parseInt(timeString.substr(4, 2) - 1),
+     parseInt(timeString.substr(6, 2)),
+     parseInt(timeString.substr(9, 2)),
+     parseInt(timeString.substr(11, 2)),
+     parseInt(timeString.substr(13, 2)));
+};
+
 // Invoke TlvWireFormat to set the default format.
 // Since tlv-wire-format.js includes this file, put this at the bottom
 // to avoid problems with cycles of require.
