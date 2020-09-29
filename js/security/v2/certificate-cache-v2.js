@@ -20,7 +20,7 @@
 
 /** @ignore */
 var Name = require('../../name.js').Name; /** @ignore */
-var Schedule = require('../../encrypt/schedule.js').Schedule; /** @ignore */
+var WireFormat = require('../../encoding/wire-format.js').WireFormat; /** @ignore */
 var CertificateV2 = require('./certificate-v2.js').CertificateV2; /** @ignore */
 var LOG = require('../../log.js').Log.LOG;
 
@@ -63,7 +63,7 @@ CertificateCacheV2.prototype.insert = function(certificate)
   var now = new Date().getTime() + this.nowOffsetMilliseconds_;
   if (notAfterTime < now) {
     if (LOG > 3) console.log("Not adding " + certificate.getName().toUri() +
-      ": already expired at " + Schedule.toIsoString(notAfterTime));
+      ": already expired at " + WireFormat.toIsoString(notAfterTime));
     return;
   }
 

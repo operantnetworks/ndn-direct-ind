@@ -284,40 +284,6 @@ WireFormat.prototype.decodeDelegationSet = function(delegationSet, input, copy)
 };
 
 /**
- * Encode the EncryptedContent v1 and return the encoding.  Your derived class
- * should override.
- * @param {EncryptedContent} encryptedContent The EncryptedContent object to
- * encode.
- * @return {Blob} A Blob containing the encoding.
- * @throws Error This always throws an "unimplemented" error. The derived class
- * should override.
- */
-WireFormat.prototype.encodeEncryptedContent = function(encryptedContent)
-{
-  throw new Error
-    ("encodeEncryptedContent is unimplemented in the base WireFormat class. You should use a derived class.");
-};
-
-/**
- * Decode input as an EncryptedContent v1 and set the fields of the
- * encryptedContent object. Your derived class should override.
- * @param {EncryptedContent} encryptedContent The EncryptedContent object
- * whose fields are updated.
- * @param {Buffer} input The buffer with the bytes to decode.
- * @param {boolean} copy (optional) If true, copy from the input when making new
- * Blob values. If false, then Blob values share memory with the input, which
- * must remain unchanged while the Blob values are used. If omitted, use true.
- * @throws Error This always throws an "unimplemented" error. The derived class
- * should override.
- */
-WireFormat.prototype.decodeEncryptedContent = function
-  (encryptedContent, input, copy)
-{
-  throw new Error
-    ("decodeEncryptedContent is unimplemented in the base WireFormat class. You should use a derived class.");
-};
-
-/**
  * Encode the EncryptedContent v2 (used in Name-based Access Control v2) and
  * return the encoding.
  * See https://github.com/named-data/name-based-access-control/blob/new/docs/spec.rst .
@@ -373,6 +339,54 @@ WireFormat.setDefaultWireFormat = function(wireFormat)
 WireFormat.getDefaultWireFormat = function()
 {
   return WireFormat.defaultWireFormat;
+};
+
+/**
+ * Convert a UNIX timestamp to ISO time representation with the "T" in the middle.
+ * @param {number} msSince1970 Timestamp as milliseconds since Jan 1, 1970 UTC.
+ * @return {string} The string representation.
+ */
+WireFormat.toIsoString = function(msSince1970)
+{
+  var utcTime = new Date(Math.round(msSince1970));
+  return utcTime.getUTCFullYear() +
+         WireFormat.to2DigitString(utcTime.getUTCMonth() + 1) +
+         WireFormat.to2DigitString(utcTime.getUTCDate()) +
+         "T" +
+         WireFormat.to2DigitString(utcTime.getUTCHours()) +
+         WireFormat.to2DigitString(utcTime.getUTCMinutes()) +
+         WireFormat.to2DigitString(utcTime.getUTCSeconds());
+};
+
+/**
+ * A private method to zero pad an integer to 2 digits.
+ * @param {number} x The number to pad.  Assume it is a non-negative integer.
+ * @return {string} The padded string.
+ */
+WireFormat.to2DigitString = function(x)
+{
+  var result = x.toString();
+  return result.length === 1 ? "0" + result : result;
+};
+
+/**
+ * Convert an ISO time representation with the "T" in the middle to a UNIX
+ * timestamp.
+ * @param {string} timeString The ISO time representation.
+ * @return {number} The timestamp as milliseconds since Jan 1, 1970 UTC.
+ */
+WireFormat.fromIsoString = function(timeString)
+{
+  if (timeString.length != 15 || timeString.substr(8, 1) != 'T')
+    throw new Error("fromIsoString: Format is not the expected yyyymmddThhmmss");
+
+  return Date.UTC
+    (parseInt(timeString.substr(0, 4)),
+     parseInt(timeString.substr(4, 2) - 1),
+     parseInt(timeString.substr(6, 2)),
+     parseInt(timeString.substr(9, 2)),
+     parseInt(timeString.substr(11, 2)),
+     parseInt(timeString.substr(13, 2)));
 };
 
 // Invoke TlvWireFormat to set the default format.

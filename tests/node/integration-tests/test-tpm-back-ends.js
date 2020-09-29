@@ -28,7 +28,7 @@ var SignedBlob = require('../../..').SignedBlob;
 var DigestAlgorithm = require('../../..').DigestAlgorithm;
 var Name = require('../../..').Name;
 var RsaKeyParams = require('../../..').RsaKeyParams;
-var RsaAlgorithm = require('../../..').RsaAlgorithm;
+var PublicKey = require('../../..').PublicKey;
 var EncryptParams = require('../../..').EncryptParams;
 var EncryptAlgorithmType = require('../../..').EncryptAlgorithmType;
 var PibKey = require('../../..').PibKey;
@@ -197,11 +197,10 @@ describe ("TestTpmBackEnds", function() {
         key = localKey;
         keyName = key.getKeyName();
 
-        var publicKey = key.derivePublicKey();
+        var publicKey = new PublicKey(key.derivePublicKey());
 
         // TODO: Move encrypt to PublicKey?
-        var cipherText = RsaAlgorithm.encrypt
-          (publicKey, content, new EncryptParams(EncryptAlgorithmType.RsaOaep));
+        var cipherText = publicKey.encrypt(content, EncryptAlgorithmType.RsaOaep);
 
         return key.decryptPromise(cipherText.buf());
       })

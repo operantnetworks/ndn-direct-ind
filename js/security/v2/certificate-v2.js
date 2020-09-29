@@ -27,7 +27,6 @@ var Sha256WithRsaSignature = require('../../sha256-with-rsa-signature.js').Sha25
 var Sha256WithEcdsaSignature = require('../../sha256-with-ecdsa-signature.js').Sha256WithEcdsaSignature; /** @ignore */
 var ContentType = require('../../meta-info.js').ContentType; /** @ignore */
 var WireFormat = require('../../encoding/wire-format.js').WireFormat; /** @ignore */
-var Schedule = require('../../encrypt/schedule.js').Schedule; /** @ignore */
 var ValidityPeriod = require('../validity-period.js').ValidityPeriod; /** @ignore */
 var InvalidArgumentException = require('../security-exception.js').InvalidArgumentException;
 
@@ -246,9 +245,9 @@ CertificateV2.prototype.toString = function()
   result += "Certificate name:\n";
   result += "  " + this.getName().toUri() + "\n";
   result += "Validity:\n";
-  result += "  NotBefore: " + Schedule.toIsoString
+  result += "  NotBefore: " + WireFormat.toIsoString
     (this.getValidityPeriod().getNotBefore()) + "\n";
-  result += "  NotAfter: " + Schedule.toIsoString
+  result += "  NotAfter: " + WireFormat.toIsoString
     (this.getValidityPeriod().getNotAfter()) + "\n";
 
   // TODO: Print the extension.
