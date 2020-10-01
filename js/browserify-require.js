@@ -17,7 +17,7 @@
  * A copy of the GNU Lesser General Public License is in the file COPYING.
  */
 
-// define a shim require function so that a node/browserify require calls dont cause errors when ndn-js is used via <script> tag
+// define a shim require function so that a node/browserify require calls dont cause errors when NDN-DIRECT-IND is used via <script> tag
 
 /** @ignore */
 var ndn = ndn || {}

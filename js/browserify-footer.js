@@ -5,10 +5,10 @@ Object.keys(ndn).forEach(function(k){
 });
 
 /**
- * Stop exposing ndn-js class names in the global namespace.
+ * Stop exposing NDN-DIRECT-IND class names in the global namespace.
  *
- * By default, ndn-js exposes all class names into the global namespace for convenience.
- * This function removes ndn-js class names from the global namespace to avoid conflicts.
+ * By default, NDN-DIRECT-IND exposes all class names into the global namespace for convenience.
+ * This function removes NDN-DIRECT-IND class names from the global namespace to avoid conflicts.
  * After that, the application must explicitly reference `ndn.` before a class name.
  */
 ndn.noConflict = function() {
