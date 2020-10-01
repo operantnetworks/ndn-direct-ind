@@ -1,4 +1,16 @@
 /**
+ * Copyright (C) 2020 Operant Networks, Incorporated.
+ * @author: Jeff Thompson <jefft0@gmail.com>
+ *
+ * This works is based substantially on previous work as listed below:
+ *
+ * Original file: tests/node/unit-tests/test-name-methods.js
+ * Original repository: https://github.com/named-data/ndn-js
+ *
+ * Summary of Changes: Add test for findParametersSha256Digest.
+ *
+ * which was originally released under the LGPL license with the following rights:
+ *
  * Copyright (C) 2014-2019 Regents of the University of California.
  * @author: Jeff Thompson <jefft0@remap.ucla.edu>
  * From PyNDN unit-tests by Adeola Bannis.
@@ -412,6 +424,14 @@ describe('TestNameMethods', function() {
       ("/hello/params-sha256=" +
        "28BAD4B5275BD392DBB670C75CF0B66F13F7942B21E80F55C0E86B374753A548");
     assert.ok(name.get(0).equals(name2.get(1)));
+
+    // Check findParametersSha256Digest.
+    assert.equal(new Name("/a/b").findParametersSha256Digest(), -1);
+    assert.equal(name2.findParametersSha256Digest(), 1,
+      "ParametersSha256Digest not at expected index");
+    name2.appendParametersSha256Digest(digest.slice(0, 32));
+    assert.equal(name2.findParametersSha256Digest(), -2,
+      "Expected error for multiple ParametersSha256Digest");
   });
 
   it('TypedNameComponent', function() {
