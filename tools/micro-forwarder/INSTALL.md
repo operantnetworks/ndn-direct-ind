@@ -1,5 +1,5 @@
-Micro Forwarder: A light-weight forwarder in the browser based on NDN-JS
-========================================================================
+Micro Forwarder: A light-weight forwarder in the browser based on NDN-DIRECT-IND
+================================================================================
 
 Native Messaging for multicast
 ==============================
