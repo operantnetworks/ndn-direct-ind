@@ -1,4 +1,16 @@
 /**
+ * Copyright (C) 2020 Operant Networks, Incorporated.
+ * @author: Jeff Thompson <jefft0@gmail.com>
+ *
+ * This works is based substantially on previous work as listed below:
+ *
+ * Original file: js/name.js
+ * Original repository: https://github.com/named-data/ndn-js
+ *
+ * Summary of Changes: Add findParametersSha256Digest.
+ *
+ * which was originally released under the LGPL license with the following rights:
+ *
  * This class represents a Name as an array of components where each is a byte array.
  * Copyright (C) 2013-2019 Regents of the University of California.
  * @author: Meki Cheraoui, Jeff Thompson <jefft0@remap.ucla.edu>
@@ -1338,6 +1350,26 @@ Name.prototype.match = function(name)
  * true if this name is empty.
  */
 Name.prototype.isPrefixOf = function(name) { return this.match(name); }
+
+/**
+ * Find the index of the ParametersSha256Digest component in this name.
+ * @return {number} The index of the only ParametersSha256Digest component, or
+ * -1 if the name doesn't have a ParametersSha256Digest components, or -2 if the
+ * name has multiple ParametersSha256Digest components.
+ */
+Name.prototype.findParametersSha256Digest = function()
+{
+  var result = -1;
+  for (var i = 0; i < this.components.length; ++i) {
+    if (this.components[i].isParametersSha256Digest()) {
+      if (result !== -1)
+        return -2;
+      result = i;
+    }
+  }
+
+  return result;
+};
 
 /**
  * Get the change count, which is incremented each time this object is changed.

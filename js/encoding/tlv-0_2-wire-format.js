@@ -1,4 +1,16 @@
 /**
+ * Copyright (C) 2020 Operant Networks, Incorporated.
+ * @author: Jeff Thompson <jefft0@gmail.com>
+ *
+ * This works is based substantially on previous work as listed below:
+ *
+ * Original file: js/encoding/tlv-0_2-wire-format.js
+ * Original repository: https://github.com/named-data/ndn-js
+ *
+ * Summary of Changes: In encode/decodeEncryptedContentV2, support encryptionAlgprithm
+ *
+ * which was originally released under the LGPL license with the following rights:
+ *
  * Copyright (C) 2013-2019 Regents of the University of California.
  * @author: Jeff Thompson <jefft0@remap.ucla.edu>
  *
@@ -672,6 +684,8 @@ Tlv0_2WireFormat.prototype.encodeEncryptedContentV2 = function(encryptedContent)
   var saveLength = encoder.getLength();
 
   // Encode backwards.
+  encoder.writeOptionalNonNegativeIntegerTlv(
+    Tlv.Encrypt_EncryptionAlgorithm, encryptedContent.getAlgorithmType());
   if (encryptedContent.getKeyLocator().getType() == KeyLocatorType.KEYNAME)
     Tlv0_2WireFormat.encodeName
       (encryptedContent.getKeyLocator().getKeyName(), encoder);
@@ -724,6 +738,9 @@ Tlv0_2WireFormat.prototype.decodeEncryptedContentV2 = function
       (encryptedContent.getKeyLocator().getKeyName(), decoder, copy);
     encryptedContent.getKeyLocator().setType(KeyLocatorType.KEYNAME);
   }
+
+  encryptedContent.setAlgorithmType(decoder.readOptionalNonNegativeIntegerTlv
+    (Tlv.Encrypt_EncryptionAlgorithm, endOffset));
 
   decoder.finishNestedTlvs(endOffset);
 };

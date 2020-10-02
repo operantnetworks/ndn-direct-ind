@@ -1,4 +1,16 @@
 /**
+ * Copyright (C) 2020 Operant Networks, Incorporated.
+ * @author: Jeff Thompson <jefft0@gmail.com>
+ *
+ * This works is based substantially on previous work as listed below:
+ *
+ * Original file: js/encrypt/decryptor-v2.js
+ * Original repository: https://github.com/named-data/ndn-js
+ *
+ * Summary of Changes: Support GCK.
+ *
+ * which was originally released under the LGPL license with the following rights:
+ *
  * Copyright (C) 2019 Regents of the University of California.
  * @author: Jeff Thompson <jefft0@remap.ucla.edu>
  * @author: From the NAC library https://github.com/named-data/name-based-access-control/blob/new/src/decryptor.cpp
@@ -21,6 +33,7 @@
 /** @ignore */
 var Name = require('../name.js').Name;
 var Interest = require('../interest.js').Interest;
+var Data = require('../data.js').Data;
 var EncryptError = require('./encrypt-error.js').EncryptError; /** @ignore */
 var KeyChain = require('../security/key-chain.js').KeyChain; /** @ignore */
 var SafeBag = require('../security/safe-bag.js').SafeBag; /** @ignore */
@@ -59,7 +72,7 @@ var DecryptorV2 = function DecryptorV2(credentialsKey, validator, keyChain, face
   this.contentKeys_ = {};
 
   this.credentialsKey_ = credentialsKey;
-  // this.validator_ = validator;
+  this.validator_ = validator;
   this.face_ = face;
   // The external keychain with access credentials.
   this.keyChain_ = keyChain;
@@ -91,11 +104,21 @@ DecryptorV2.prototype.shutdown = function()
 };
 
 /**
- * Asynchronously decrypt the encryptedContent.
+ * There are three forms of the decrypt method:
+ * decrypt(encryptedContent, onSuccess, onError) - Asynchronously decrypt the
+ * encryptedContent.
+ * decrypt(data, onSuccess, onError) - Asynchronously decrypt the Data packet
+ * content by decoding it as an EncryotedContent.
+ * decrypt(interest, onSuccess, onError) - Asynchronously decrypt the Interest's
+ * ApplicationParameters by decoding it as an EncryotedContent.
  * @param {EncryptedContent} encryptedContent The EncryptedContent to decrypt,
  * which must have a KeyLocator with a KEYNAME and and initial vector. This does
  * not copy the EncryptedContent object. If you may change it later, then pass
  * in a copy of the object.
+ * @param {Data} data The Data packet whose content is decoded as an
+ * EncryptdContent.
+ * @param {Interest} interest The Interest whose ApplicationParameters is
+ * decoded as an EncryptdContent.
  * @param {function} onSuccess On successful decryption, this calls
  * onSuccess(plainData) where plainData is the decrypted Blob.
  * NOTE: The library will log any exceptions thrown by this callback, but for
@@ -108,8 +131,41 @@ DecryptorV2.prototype.shutdown = function()
  * better error handling the callback should catch and properly handle any
  * exceptions.
  */
-DecryptorV2.prototype.decrypt = function(encryptedContent, onSuccess, onError)
+DecryptorV2.prototype.decrypt = function
+  (encryptedContentOrObject, onSuccess, onError)
 {
+  if (encryptedContentOrObject instanceof Data) {
+    var data = encryptedContentOrObject;
+
+    var encryptedContent = new EncryptedContent();
+    try {
+      encryptedContent.wireDecodeV2(data.getContent());
+    } catch (ex) {
+      onError(EncryptError.ErrorCode.DecryptionFailure,
+        "Error decoding the Data content as EncryptedContent: " + ex);
+      return;
+    }
+
+    this.decrypt(encryptedContent, onSuccess, onError);
+    return;
+  }
+  else if (encryptedContentOrObject instanceof Interest) {
+    var interest = encryptedContentOrObject;
+
+    var encryptedContent = new EncryptedContent();
+    try {
+      encryptedContent.wireDecodeV2(interest.getApplicationParameters());
+    } catch (ex) {
+      onError(EncryptError.ErrorCode.DecryptionFailure,
+        "Error decoding the Interest ApplicationParameters as EncryptedContent: " + ex);
+      return;
+    }
+
+    this.decrypt(encryptedContent, onSuccess, onError);
+    return;
+  }
+
+  var encryptedContent = encryptedContentOrObject;
   if (encryptedContent.getKeyLocator().getType() != KeyLocatorType.KEYNAME) {
     if (LOG > 3) console.log
       ("Missing required KeyLocator in the supplied EncryptedContent block");
@@ -144,8 +200,12 @@ DecryptorV2.prototype.decrypt = function(encryptedContent, onSuccess, onError)
       (encryptedContent, onSuccess, onError));
   }
 
-  if (isNew)
-    this.fetchCk_(ckName, contentKey, onError, EncryptorV2.N_RETRIES);
+  if (isNew) {
+    if (ckName.size() >= 2 && ckName.get(-2).equals(EncryptorV2.NAME_COMPONENT_GCK))
+      this.fetchGck_(ckName, contentKey, onError, EncryptorV2.N_RETRIES);
+    else
+      this.fetchCk_(ckName, contentKey, onError, EncryptorV2.N_RETRIES);
+  }
 };
 
 DecryptorV2.ContentKey = function DecryptorV2ContentKey()
@@ -184,52 +244,61 @@ DecryptorV2.prototype.fetchCk_ = function
 
   var thisDecryptor = this;
   var onData = function(ckInterest, ckData) {
-    try {
       contentKey.pendingInterest = 0;
-      // TODO: Verify that the key is legitimate.
-      var kdkPrefix = [null];
-      var kdkIdentityName = [null];
-      var kdkKeyName = [null];
-      if (!DecryptorV2.extractKdkInfoFromCkName_
-          (ckData.getName(), ckInterest.getName(), onError, kdkPrefix,
-           kdkIdentityName, kdkKeyName))
-        // The error has already been reported.
-        return;
 
-      // Check if the KDK already exists.
-      var kdkIdentity = null;
-      try {
-        // Debug: Use a Promise.
-        kdkIdentity = thisDecryptor.internalKeyChain_.getPib().getIdentity
-          (kdkIdentityName[0]);
-      } catch (ex) {
-        if (!(ex instanceof Pib.Error))
-          throw ex;
-      }
-      if (kdkIdentity != null) {
-        var kdkKey = null;
-        try {
-          // Debug: Use a Promise.
-          kdkKey = kdkIdentity.getKey(kdkKeyName[0]);
-        } catch (ex) {
-          if (!(ex instanceof Pib.Error))
-            throw ex;
-        }
-        if (kdkKey != null) {
-          // The KDK was already fetched and imported.
-          if (LOG > 3) console.log("KDK " + kdkKeyName.toUri() +
-            " already exists, so directly using it to decrypt the CK");
-          thisDecryptor.decryptCkAndProcessPendingDecrypts_
-            (contentKey, ckData, kdkKeyName[0], onError);
-          return;
-        }
-      }
+      // Validate the Data signature.
+      thisDecryptor.validator_.validate
+        (ckData,
+         function(d) {
+           try {
+             var kdkPrefix = [null];
+             var kdkIdentityName = [null];
+             var kdkKeyName = [null];
+             if (!DecryptorV2.extractKdkInfoFromCkName_
+                 (ckData.getName(), ckInterest.getName(), onError, kdkPrefix,
+                  kdkIdentityName, kdkKeyName))
+               // The error has already been reported.
+               return;
 
-      thisDecryptor.fetchKdk_
-        (contentKey, kdkPrefix[0], ckData, onError, EncryptorV2.N_RETRIES);
-    } catch (ex) {
-      onError(EncryptError.ErrorCode.General, "Error in fetchCk onData: " + ex);
-    }
+             // Check if the KDK already exists.
+             var kdkIdentity = null;
+             try {
+               // Debug: Use a Promise.
+               kdkIdentity = thisDecryptor.internalKeyChain_.getPib().getIdentity
+                 (kdkIdentityName[0]);
+             } catch (ex) {
+               if (!(ex instanceof Pib.Error))
+                 throw ex;
+             }
+             if (kdkIdentity != null) {
+               var kdkKey = null;
+               try {
+                 // Debug: Use a Promise.
+                 kdkKey = kdkIdentity.getKey(kdkKeyName[0]);
+               } catch (ex) {
+                 if (!(ex instanceof Pib.Error))
+                   throw ex;
+               }
+               if (kdkKey != null) {
+                 // The KDK was already fetched and imported.
+                 if (LOG > 3) console.log("KDK " + kdkKeyName.toUri() +
+                   " already exists, so directly using it to decrypt the CK");
+                 thisDecryptor.decryptCkAndProcessPendingDecrypts_
+                   (contentKey, ckData, kdkKeyName[0], onError);
+                 return;
+               }
+             }
+
+             thisDecryptor.fetchKdk_
+               (contentKey, kdkPrefix[0], ckData, onError, EncryptorV2.N_RETRIES);
+           } catch (ex) {
+             onError(EncryptError.ErrorCode.General, "Error in fetchCk onData: " + ex);
+           }
+         },
+         function(d, error) {
+           onError(EncryptError.ErrorCode.CkRetrievalFailure,
+             "Validate CK Data failure: " + error.toString());
+         });
   };
 
   var onTimeout = function(interest) {
@@ -284,16 +353,24 @@ DecryptorV2.prototype.fetchKdk_ = function
   var thisDecryptor = this;
   var onData = function(kdkInterest, kdkData) {
     contentKey.pendingInterest = 0;
-    // TODO: Verify that the key is legitimate.
 
-    var isOk = thisDecryptor.decryptAndImportKdk_(kdkData, onError);
-    if (!isOk)
-      return;
-    // This way of getting the kdkKeyName is a bit hacky.
-    var kdkKeyName = kdkPrefix.getPrefix(-2)
-      .append("KEY").append(kdkPrefix.get(-1));
-    thisDecryptor.decryptCkAndProcessPendingDecrypts_
-      (contentKey, ckData, kdkKeyName, onError);
+    // Validate the Data signature.
+    thisDecryptor.validator_.validate
+      (kdkData,
+       function(d) {
+         var isOk = thisDecryptor.decryptAndImportKdk_(kdkData, onError);
+         if (!isOk)
+           return;
+         // This way of getting the kdkKeyName is a bit hacky.
+         var kdkKeyName = kdkPrefix.getPrefix(-2)
+           .append("KEY").append(kdkPrefix.get(-1));
+         thisDecryptor.decryptCkAndProcessPendingDecrypts_
+           (contentKey, ckData, kdkKeyName, onError);
+       },
+       function(d, error) {
+         onError(EncryptError.ErrorCode.CkRetrievalFailure,
+           "Validate KDK Data failure: " + error.toString());
+       });
   };
 
   var onTimeout = function(interest) {
@@ -359,6 +436,84 @@ DecryptorV2.prototype.decryptAndImportKdk_ = function(kdkData, onError)
 };
 
 /**
+ * Fetch the encrypted group content key by appending ckName with
+ * /ENCRYPTED-BY/<credential-identity>/KEY/<key-id> . When received, call
+ * decryptCkAndProcessPendingDecrypts().
+ * @param {Name} ckName The Name from the KeyLocator of the EncryptedContent.
+ * Assume this has GCK instead of CK.
+ * @param {DecryptorV2.ContentKey} contentKey The ContentKey for storing the
+ * content key bits (passed to decryptCkAndProcessPendingDecrypts()).
+ * @param {function} onError On failure, this calls onError(errorCode, message)
+ * where errorCode is from EncryptError::ErrorCode, and message is an error
+ * string.
+ * @param {number} nTriesLeft If fetching times out, decrement nTriesLeft and
+ * try again until it is zero.
+ */
+DecryptorV2.prototype.fetchGck_ = function
+  (ckName, contentKey, onError, nTriesLeft)
+{
+  // <whatever-prefix>/GCK/<ck-id>  /ENCRYPTED-BY /<credential-identity>/KEY/<key-id>
+  // \                           /                \                                 /
+  //  -----------  --------------                  ----------------  ---------------
+  //             \/                                                \/
+  //   from the encrypted data                             from configuration
+
+  var encryptedGckName = new Name(ckName);
+  encryptedGckName
+    .append(EncryptorV2.NAME_COMPONENT_ENCRYPTED_BY)
+    .append(this.credentialsKey_.getName());
+
+  if (LOG > 3) console.log("DecryptorV2: Fetching GCK " + encryptedGckName.toUri());
+
+  // Prepare the callbacks.
+  var thisDecryptor = this;
+  var onData = function(ckInterest, ckData) {
+    try {
+      contentKey.pendingInterest = 0;
+
+      // Validate the Data signature.
+      thisDecryptor.validator_.validate
+        (ckData,
+         function(d) {
+           // Pass an empty kdkKeyName so that we decrypt with the credentialsKey_.
+           thisDecryptor.decryptCkAndProcessPendingDecrypts_
+             (contentKey, ckData, new Name(), onError);
+         },
+         function(d, error) {
+           onError(EncryptError.ErrorCode.CkRetrievalFailure,
+             "Validate GCK Data failure: " + error.toString());
+         });
+    } catch (ex) {
+      onError(EncryptError.ErrorCode.General, "Error in fetchGck onData: " + ex);
+    }
+  };
+
+  var onTimeout = function(interest) {
+    contentKey.pendingInterest = 0;
+    if (nTriesLeft > 1)
+      thisDecryptor.fetchGck_(ckName, contentKey, onError, nTriesLeft - 1);
+    else
+      onError(EncryptError.ErrorCode.CkRetrievalTimeout,
+        "Retrieval of GCK [" + interest.getName().toUri() + "] timed out");
+  };
+
+  var onNetworkNack = function(interest, networkNack) {
+    contentKey.pendingInterest = 0;
+    onError(EncryptError.ErrorCode.CkRetrievalFailure,
+      "Retrieval of GCK [" + interest.getName().toUri() +
+      "] failed. Got NACK (" + networkNack.getReason() + ")");
+  };
+
+  try {
+    contentKey.pendingInterest = this.face_.expressInterest
+      (new Interest(ckName).setMustBeFresh(false).setCanBePrefix(true),
+       onData, onTimeout, onNetworkNack);
+  } catch (ex) {
+    onError(EncryptError.ErrorCode.General, "expressInterest error: " + ex);
+  }
+};
+
+/**
  * @param {DecryptorV2.ContentKey} contentKey
  * @param {Data} ckData
  * @param {Name} kdkKeyName
@@ -379,21 +534,41 @@ DecryptorV2.prototype.decryptCkAndProcessPendingDecrypts_ = function
   }
 
   var ckBits;
-  try {
-    // Debug: Use a Promise.
-    ckBits = SyncPromise.getValue(this.internalKeyChain_.getTpm().decryptPromise
-      (content.getPayload().buf(), kdkKeyName, true));
-  } catch (ex) {
-    // We don't expect this from the in-memory KeyChain.
-    onError(EncryptError.ErrorCode.DecryptionFailure,
-      "Error decrypting the CK EncryptedContent " + ex);
-    return;
-  }
+  if (kdkKeyName.size() == 0) {
+    // Assume this is a group content key encrypted directly with credentialsKey_.
+    try {
+      ckBits = SyncPromise.getValue(this.keyChain_.getTpm().decryptPromise
+        (content.getPayload().buf(), this.credentialsKey_.getName(), true));
+    } catch (ex) {
+      onError(EncryptError.ErrorCode.DecryptionFailure,
+        "Error decrypting the GCK " + ex);
+      return;
+    }
 
-  if (ckBits.isNull()) {
-    onError(EncryptError.ErrorCode.TpmKeyNotFound,
-      "Could not decrypt secret, " + kdkKeyName.toUri() + " not found in TPM");
-    return;
+    if (ckBits.isNull()) {
+      onError(EncryptError.ErrorCode.TpmKeyNotFound,
+        "Could not decrypt secret, " + this.credentialsKey_.getName().toUri() +
+        " not found in TPM");
+      return;
+    }
+  }
+  else {
+    try {
+      // Debug: Use a Promise.
+      ckBits = SyncPromise.getValue(this.internalKeyChain_.getTpm().decryptPromise
+        (content.getPayload().buf(), kdkKeyName, true));
+    } catch (ex) {
+      // We don't expect this from the in-memory KeyChain.
+      onError(EncryptError.ErrorCode.DecryptionFailure,
+        "Error decrypting the CK EncryptedContent " + ex);
+      return;
+    }
+
+    if (ckBits.isNull()) {
+      onError(EncryptError.ErrorCode.TpmKeyNotFound,
+        "Could not decrypt secret, " + kdkKeyName.toUri() + " not found in TPM");
+      return;
+    }
   }
 
   contentKey.bits = ckBits;
