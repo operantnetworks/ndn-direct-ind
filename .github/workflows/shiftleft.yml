@@ -25,7 +25,7 @@ jobs:
       run: echo "##[set-output name=branch;]$(echo ${GITHUB_REF#refs/heads/})"
       id: extract_branch
     - name: NextGen Static Analysis
-      run: ${GITHUB_WORKSPACE}/sl analyze --wait --app ndn-js-ind --tag branch=${{ github.head_ref || steps.extract_branch.outputs.branch }} --js --cpg .
+      run: ${GITHUB_WORKSPACE}/sl analyze --wait --app ndn-direct-ind --tag branch=${{ github.head_ref || steps.extract_branch.outputs.branch }} --js --cpg .
       env:
         SHIFTLEFT_ACCESS_TOKEN: ${{ secrets.SHIFTLEFT_ACCESS_TOKEN }}
         
@@ -40,7 +40,7 @@ jobs:
     #  run: |
     #    curl https://cdn.shiftleft.io/download/sl > ${GITHUB_WORKSPACE}/sl && chmod a+rx ${GITHUB_WORKSPACE}/sl
     #- name: Validate Build Rules
-    #  run: sleep 10s && ${GITHUB_WORKSPACE}/sl check-analysis --app ndn-js-ind --source 'tag.branch=${{ github.event.pull_request.base.ref }}' --target "tag.branch=${{ github.head_ref || steps.extract_branch.outputs.branch }}"
+    #  run: sleep 10s && ${GITHUB_WORKSPACE}/sl check-analysis --app ndn-direct-ind --source 'tag.branch=${{ github.event.pull_request.base.ref }}' --target "tag.branch=${{ github.head_ref || steps.extract_branch.outputs.branch }}"
     #  env:
         #SHIFTLEFT_ACCESS_TOKEN: ${{ secrets.SHIFTLEFT_ACCESS_TOKEN }}
         
