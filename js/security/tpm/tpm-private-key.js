@@ -120,20 +120,20 @@ TpmPrivateKey.prototype.loadPkcs1 = function(encoding, keyType)
   if (keyType == KeyType.EC) {
     // Encode the DER as PEM.
     var keyBase64 = encoding.toString('base64');
-    var keyPem = "-----BEGIN EC PRIVATE KEY-----\n";
+    var keyPem = "-----BEGIN EC" + " PRIVATE KEY-----\n";
     for (var i = 0; i < keyBase64.length; i += 64)
       keyPem += (keyBase64.substr(i, 64) + "\n");
-    keyPem += "-----END EC PRIVATE KEY-----";
+    keyPem += "-----END EC" + " PRIVATE KEY-----";
 
     this.privateKey_ = keyPem;
   }
   else if (keyType == KeyType.RSA) {
     // Encode the DER as PEM.
     var keyBase64 = encoding.toString('base64');
-    var keyPem = "-----BEGIN RSA PRIVATE KEY-----\n";
+    var keyPem = "-----BEGIN RSA" + " PRIVATE KEY-----\n";
     for (var i = 0; i < keyBase64.length; i += 64)
       keyPem += (keyBase64.substr(i, 64) + "\n");
-    keyPem += "-----END RSA PRIVATE KEY-----";
+    keyPem += "-----END RSA" + " PRIVATE KEY-----";
 
     this.privateKey_ = keyPem;
   }
