@@ -348,6 +348,37 @@ PibImpl.prototype.addCertificatePromise = function(certificate, useSync)
 };
 
 /**
+ * Add the certificate. If a certificate with the same name (without implicit
+ * digest) already exists, then overwrite the certificate. If the key or
+ * identity does not exist, they will be created. If no default certificate for
+ * the key has been set, then set the added certificate as the default for the
+ * key. If no default key was set for the identity, it will be set as the
+ * default key for the identity. If no default identity was selected, the
+ * certificate's identity becomes the default.
+ * @param {CertificateV2} certificate The certificate to add. This copies the
+ * object.
+ * @param {function} onComplete (optional) This calls onComplete() when the
+ * operation is complete. If omitted, do not use it. (Some database libraries
+ * only use a callback, so onComplete is required to use these.)
+ * NOTE: The library will log any exceptions thrown by this callback, but for
+ * better error handling the callback should catch and properly handle any
+ * exceptions.
+ * @param {function} onError (optional) If defined, then onComplete must be
+ * defined and if there is an exception, then this calls onError(exception)
+ * with the exception. If onComplete is defined but onError is undefined, then
+ * this will log any thrown exception. (Some database libraries only use a
+ * callback, so onError is required to be notified of an exception.)
+ * NOTE: The library will log any exceptions thrown by this callback, but for
+ * better error handling the callback should catch and properly handle any
+ * exceptions.
+ */
+PibImpl.prototype.addCertificate = function(certificate, onComplete, onError)
+{
+  return SyncPromise.complete(onComplete, onError,
+    this.addCertificatePromise(certificate, !onComplete));
+};
+
+/**
  * Remove the certificate with name certificateName. If the certificate does not
  * exist, do nothing.
  * @param {Name} certificateName The name of the certificate.
