@@ -1,4 +1,16 @@
 /**
+ * Copyright (C) 2020 Operant Networks, Incorporated.
+ * @author: Jeff Thompson <jefft0@gmail.com>
+ *
+ * This works is based substantially on previous work as listed below:
+ *
+ * Original file: tests/node/unit-tests/test-der-encode-decode.js
+ * Original repository: https://github.com/named-data/ndn-js
+ *
+ * Summary of Changes: Remove security v1.
+ *
+ * which was originally released under the LGPL license with the following rights:
+ *
  * Copyright (C) 2014-2019 Regents of the University of California.
  * @author: Jeff Thompson <jefft0@remap.ucla.edu>
  * From PyNDN unit-tests by Adeola Bannis.
@@ -32,10 +44,6 @@ var PublicKey = require('../../..').PublicKey;
 var Certificate = require('../../..').Certificate;
 var CertificateSubjectDescription = require('../../..').CertificateSubjectDescription;
 var CertificateExtension = require('../../..').CertificateExtension;
-var IdentityCertificate = require('../../..').IdentityCertificate;
-var MemoryIdentityStorage = require('../../..').MemoryIdentityStorage;
-var MemoryPrivateKeyStorage = require('../../..').MemoryPrivateKeyStorage;
-var IdentityManager = require('../../..').IdentityManager;
 
 var PUBLIC_KEY = new Buffer([
 0x30, 0x81, 0x9d, 0x30, 0x0d, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01,
@@ -202,7 +210,7 @@ describe('TestDerEncodeDecode', function() {
       "Wrong extension value trust class after decoding");
     assert.equal(trustLevel, decodedTrustLevel.toVal(),
       "Wrong extension value trust level after decoding");
-});
+  });
 
   it('Decode', function() {
     var data = new Data(new Name("/tmp"));
@@ -222,32 +230,5 @@ describe('TestDerEncodeDecode', function() {
     assert.equal(expectedEncoding, derOid.encode().toHex(),
                  "Incorrect OID encoding");
     assert.equal(oidString, derOid.toVal(), "Incorrect decoded OID");
-  });
-
-  it('PrepareUnsignedCertificate', function() {
-    var identityStorage = new MemoryIdentityStorage();
-    var privateKeyStorage = new MemoryPrivateKeyStorage();
-    var identityManager = new IdentityManager(identityStorage, privateKeyStorage);
-    var keyName = new Name("/test/ksk-1457560485494");
-    identityStorage.addKey(keyName, KeyType.RSA, new Blob(PUBLIC_KEY, false));
-
-    var subjectDescriptions = [];
-    subjectDescriptions.push(new CertificateSubjectDescription
-      (TEST_OID, "TEST NAME"));
-    var debugCertPrefix = null;
-    var newCertificate = identityManager.prepareUnsignedIdentityCertificate
-      (keyName, keyName.getPrefix(1), toyCertNotBefore, toyCertNotAfter,
-       subjectDescriptions, debugCertPrefix);
-
-    // Update the generated certificate version to equal the one in toyCert.
-    newCertificate.setName
-      (new Name(newCertificate.getName().getPrefix(-1).append
-       (toyCert.getName().get(-1))));
-
-    // Make a copy to test encoding.
-    var certificateCopy = new IdentityCertificate(newCertificate);
-    assert.equal
-      (certificateCopy.toString(), toyCert.toString(),
-      "Prepared unsigned certificate dump does not have the expected format");
   });
 });
