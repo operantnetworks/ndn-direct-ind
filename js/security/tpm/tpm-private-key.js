@@ -359,30 +359,44 @@ TpmPrivateKey.prototype.derivePublicKey = function()
     // Decode the PKCS #1 RSAPrivateKey.
     var parsedNode = DerNode.parse(rsaPrivateKeyDer, 0);
     var rsaPrivateKeyChildren = parsedNode.getChildren();
-    var modulus = rsaPrivateKeyChildren[1];
-    var publicExponent = rsaPrivateKeyChildren[2];
-
-    // Encode the PKCS #1 RSAPublicKey.
-    var rsaPublicKey = new DerNode.DerSequence();
-    rsaPublicKey.addChild(modulus);
-    rsaPublicKey.addChild(publicExponent);
-    var rsaPublicKeyDer = rsaPublicKey.encode();
-
-    // Encode the SubjectPublicKeyInfo.
-    var algorithmIdentifier = new DerNode.DerSequence();
-    algorithmIdentifier.addChild(new DerNode.DerOid(new OID
-      (TpmPrivateKey.RSA_ENCRYPTION_OID)));
-    algorithmIdentifier.addChild(new DerNode.DerNull());
-    var publicKey = new DerNode.DerSequence();
-    publicKey.addChild(algorithmIdentifier);
-    publicKey.addChild(new DerNode.DerBitString(rsaPublicKeyDer.buf(), 0));
-
-    return publicKey.encode();
+    var modulus = rsaPrivateKeyChildren[1].getPayload().buf();
+    var publicExponent = rsaPrivateKeyChildren[2].getPayload().buf();
+    return TpmPrivateKey.encodeRsaSubjectPublicKeyInfo(modulus, publicExponent);
   } catch (ex) {
     // We don't expect this to happen since the key was encoded here.
     throw new TpmPrivateKey.Error(new Error
       ("derivePublicKey: Error decoding private key " + ex));
   }
+};
+
+/**
+ * Encode the modulus and public exponent as a SubjectPublicKeyInfo with a
+ * PKCS #1 RSAPublicKey.
+ * @param {Buffer} modulus The modulus as a buffer of bytes. If the first byte
+ * is >= 0x80 then you must prepend a 0x00 byte to make it non-negative.
+ * @param {Buffer} publicExponent The public exponent as a buffer of bytes. If
+ * the first byte is >= 0x80 then you must prepend a 0x00 byte to make it
+ * non-negative.
+ * @returns {Blob} The encoded public key.
+ */
+TpmPrivateKey.encodeRsaSubjectPublicKeyInfo = function(modulus, publicExponent)
+{
+  // Encode the PKCS #1 RSAPublicKey.
+  var rsaPublicKey = new DerNode.DerSequence();
+  rsaPublicKey.addChild(new DerNode.DerInteger(modulus));
+  rsaPublicKey.addChild(new DerNode.DerInteger(publicExponent));
+  var rsaPublicKeyDer = rsaPublicKey.encode();
+
+  // Encode the SubjectPublicKeyInfo.
+  var algorithmIdentifier = new DerNode.DerSequence();
+  algorithmIdentifier.addChild(new DerNode.DerOid(new OID
+    (TpmPrivateKey.RSA_ENCRYPTION_OID)));
+  algorithmIdentifier.addChild(new DerNode.DerNull());
+  var publicKey = new DerNode.DerSequence();
+  publicKey.addChild(algorithmIdentifier);
+  publicKey.addChild(new DerNode.DerBitString(rsaPublicKeyDer.buf(), 0));
+
+  return publicKey.encode();
 };
 
 /**
