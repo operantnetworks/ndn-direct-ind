@@ -7,7 +7,7 @@
  * Original file: js/encrypt/decryptor-v2.js
  * Original repository: https://github.com/named-data/ndn-js
  *
- * Summary of Changes: Support GCK.
+ * Summary of Changes: Support GCK, async TPM.
  *
  * which was originally released under the LGPL license with the following rights:
  *
@@ -358,14 +358,16 @@ DecryptorV2.prototype.fetchKdk_ = function
     thisDecryptor.validator_.validate
       (kdkData,
        function(d) {
-         var isOk = thisDecryptor.decryptAndImportKdk_(kdkData, onError);
-         if (!isOk)
-           return;
-         // This way of getting the kdkKeyName is a bit hacky.
-         var kdkKeyName = kdkPrefix.getPrefix(-2)
-           .append("KEY").append(kdkPrefix.get(-1));
-         thisDecryptor.decryptCkAndProcessPendingDecrypts_
-           (contentKey, ckData, kdkKeyName, onError);
+         thisDecryptor.decryptAndImportKdk_
+           (kdkData,
+            function() {
+              // This way of getting the kdkKeyName is a bit hacky.
+              var kdkKeyName = kdkPrefix.getPrefix(-2)
+                .append("KEY").append(kdkPrefix.get(-1));
+              thisDecryptor.decryptCkAndProcessPendingDecrypts_
+                (contentKey, ckData, kdkKeyName, onError);
+            },
+            onError);
        },
        function(d, error) {
          onError(EncryptError.ErrorCode.CkRetrievalFailure,
@@ -401,38 +403,40 @@ DecryptorV2.prototype.fetchKdk_ = function
 
 /**
  * @param {Data} kdkData
+ * @param {function} onSuccess On successful decryption, this calls onSuccess().
  * @param {function} onError On error, this calls onError(errorCode, message).
  * @returns {boolean} True for success, false for error (where this has called 
  * onError).
  */
-DecryptorV2.prototype.decryptAndImportKdk_ = function(kdkData, onError)
+DecryptorV2.prototype.decryptAndImportKdk_ = function(kdkData, onSuccess, onError)
 {
-  try {
-    if (LOG > 3) console.log("Decrypting and importing KDK " +
-      kdkData.getName().toUri());
-    var encryptedContent = new EncryptedContent();
-    encryptedContent.wireDecodeV2(kdkData.getContent());
+  if (LOG > 3) console.log("Decrypting and importing KDK " +
+    kdkData.getName().toUri());
+  var encryptedContent = new EncryptedContent();
+  encryptedContent.wireDecodeV2(kdkData.getContent());
 
-    var safeBag = new SafeBag(encryptedContent.getPayload());
-    // Debug: Use a Promise.
-    var secret = SyncPromise.getValue(this.keyChain_.getTpm().decryptPromise
-      (encryptedContent.getPayloadKey().buf(), this.credentialsKey_.getName(), true));
+  var safeBag = new SafeBag(encryptedContent.getPayload());
+  var thisDecryptor = this;
+  this.keyChain_.getTpm().decryptPromise
+    (encryptedContent.getPayloadKey().buf(), this.credentialsKey_.getName())
+  .then(function(secret) {
     if (secret.isNull()) {
       onError(EncryptError.ErrorCode.TpmKeyNotFound,
          "Could not decrypt secret, " + this.credentialsKey_.getName().toUri() +
          " not found in TPM");
-      return false;
+      return SyncPromise.resolve();
     }
 
-    this.internalKeyChain_.importSafeBag(safeBag, secret.buf());
-    return true;
-  } catch (ex) {
+    thisDecryptor.internalKeyChain_.importSafeBag(safeBag, secret.buf());
+    onSuccess();
+    return SyncPromise.resolve();
+  })
+  .catch(function(err) {
     // This can be EncodingException, Pib.Error, Tpm.Error, or a bunch of
     // other runtime-derived errors.
     onError(EncryptError.ErrorCode.DecryptionFailure,
-       "Failed to decrypt KDK [" + kdkData.getName().toUri() + "]: " + ex);
-    return false;
-  }
+      "Failed to decrypt KDK [" + kdkData.getName().toUri() + "]: " + err);
+  });
 };
 
 /**
@@ -506,7 +510,7 @@ DecryptorV2.prototype.fetchGck_ = function
 
   try {
     contentKey.pendingInterest = this.face_.expressInterest
-      (new Interest(ckName).setMustBeFresh(false).setCanBePrefix(true),
+      (new Interest(encryptedGckName).setMustBeFresh(false).setCanBePrefix(true),
        onData, onTimeout, onNetworkNack);
   } catch (ex) {
     onError(EncryptError.ErrorCode.General, "expressInterest error: " + ex);
@@ -533,56 +537,61 @@ DecryptorV2.prototype.decryptCkAndProcessPendingDecrypts_ = function
     return;
   }
 
-  var ckBits;
+  function processPendingDecrypts(ckBits) {
+    contentKey.bits = ckBits;
+    contentKey.isRetrieved = true;
+
+    for (var i in contentKey.pendingDecrypts) {
+      var pendingDecrypt = contentKey.pendingDecrypts[i];
+      // TODO: If this calls onError, should we quit?
+      DecryptorV2.doDecrypt_
+        (pendingDecrypt.encryptedContent, contentKey.bits,
+         pendingDecrypt.onSuccess, pendingDecrypt.onError);
+    }
+
+    contentKey.pendingDecrypts = [];
+  }
+
   if (kdkKeyName.size() == 0) {
     // Assume this is a group content key encrypted directly with credentialsKey_.
-    try {
-      ckBits = SyncPromise.getValue(this.keyChain_.getTpm().decryptPromise
-        (content.getPayload().buf(), this.credentialsKey_.getName(), true));
-    } catch (ex) {
-      onError(EncryptError.ErrorCode.DecryptionFailure,
-        "Error decrypting the GCK " + ex);
-      return;
-    }
+    var thisDecryptor = this;
+    this.keyChain_.getTpm().decryptPromise
+      (content.getPayload().buf(), this.credentialsKey_.getName())
+    .then(function(ckBits) {
+      if (ckBits.isNull()) {
+        onError(EncryptError.ErrorCode.TpmKeyNotFound,
+          "Could not decrypt secret, " + thisDecryptor.credentialsKey_.getName().toUri() +
+          " not found in TPM");
+        return SyncPromise.resolve();
+      }
 
-    if (ckBits.isNull()) {
-      onError(EncryptError.ErrorCode.TpmKeyNotFound,
-        "Could not decrypt secret, " + this.credentialsKey_.getName().toUri() +
-        " not found in TPM");
-      return;
-    }
+      processPendingDecrypts(ckBits);
+      return SyncPromise.resolve();
+    })
+    .catch(function(err) {
+      onError(EncryptError.ErrorCode.DecryptionFailure,
+        "Error decrypting the GCK " + err);
+    });
   }
   else {
-    try {
-      // Debug: Use a Promise.
-      ckBits = SyncPromise.getValue(this.internalKeyChain_.getTpm().decryptPromise
-        (content.getPayload().buf(), kdkKeyName, true));
-    } catch (ex) {
+    this.internalKeyChain_.getTpm().decryptPromise
+      (content.getPayload().buf(), kdkKeyName)
+    .then(function(ckBits) {
+      if (ckBits.isNull()) {
+        onError(EncryptError.ErrorCode.TpmKeyNotFound,
+          "Could not decrypt secret, " + kdkKeyName.toUri() + " not found in TPM");
+        return SyncPromise.resolve();
+      }
+
+      processPendingDecrypts(ckBits);
+      return SyncPromise.resolve();
+    })
+    .catch(function(err) {
       // We don't expect this from the in-memory KeyChain.
       onError(EncryptError.ErrorCode.DecryptionFailure,
-        "Error decrypting the CK EncryptedContent " + ex);
-      return;
-    }
-
-    if (ckBits.isNull()) {
-      onError(EncryptError.ErrorCode.TpmKeyNotFound,
-        "Could not decrypt secret, " + kdkKeyName.toUri() + " not found in TPM");
-      return;
-    }
+        "Error decrypting the CK EncryptedContent " + err);
+    });
   }
-
-  contentKey.bits = ckBits;
-  contentKey.isRetrieved = true;
-
-  for (var i in contentKey.pendingDecrypts) {
-    var pendingDecrypt = contentKey.pendingDecrypts[i];
-    // TODO: If this calls onError, should we quit?
-    DecryptorV2.doDecrypt_
-      (pendingDecrypt.encryptedContent, contentKey.bits,
-       pendingDecrypt.onSuccess, pendingDecrypt.onError);
-  }
-
-  contentKey.pendingDecrypts = [];
 };
 
 /**

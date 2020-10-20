@@ -7,7 +7,7 @@
  * Original file: js/encrypt/encryptor-v2.js
  * Original repository: https://github.com/named-data/ndn-js
  *
- * Summary of Changes: Support GCK.
+ * Summary of Changes: Support GCK, async TPM.
  *
  * which was originally released under the LGPL license with the following rights:
  *
@@ -109,7 +109,7 @@ var EncryptorV2 = function EncryptorV2
   // Generated CK name or fetched GCK name.
   this.ckName_ = new Name();
   // Generated CK (set by regenerateCk) or fetched GCK bits.
-  this.ckBits_ = Crypto.randomBytes(EncryptorV2.AES_KEY_SIZE);
+  this.ckBits_ = Buffer.alloc(EncryptorV2.AES_KEY_SIZE);
   this.onError_ = onError;
 
   // For creating CK Data packets. Not used for GCK.
@@ -363,13 +363,14 @@ EncryptorV2.prototype.regenerateCk = function()
   this.ckName_.appendVersion(new Date().getTime());
 
   if (LOG > 3) console.log("Generating new CK: " + this.ckName_.toUri());
+  this.ckBits_ = Crypto.randomBytes(EncryptorV2.AES_KEY_SIZE);
 
   // One implication: If the CK is updated before the KEK is fetched, then
   // the KDK for the old CK will not be published.
   if (this.kekData_ == null)
     this.retryFetchingKek_();
   else
-    this.makeAndPublishCkData_(this.onError_);
+    this.makeAndPublishCkData_(function(){}, this.onError_);
 };
 
 /**
@@ -453,9 +454,7 @@ EncryptorV2.prototype.fetchKekAndPublishCkData_ = function
       (kekData,
        function(d) {
          thisEncryptor.kekData_ = kekData;
-         if (thisEncryptor.makeAndPublishCkData_(onError))
-           onReady();
-         // Otherwise, failure has already been reported.
+         thisEncryptor.makeAndPublishCkData_(onReady, onError);
        },
        function(d, error) {
          onError(EncryptError.ErrorCode.CkRetrievalFailure,
@@ -511,12 +510,13 @@ EncryptorV2.prototype.fetchKekAndPublishCkData_ = function
 /**
  * Make a CK Data packet for ckName_ encrypted by the KEK in kekData_ and
  * insert it in the storage_.
+ * @param {function} onReady When the CK Data packet is made and published, this
+ * calls onReady().
  * @param {function} onError On failure, this calls onError(errorCode, message)
  * where errorCode is from EncryptError.ErrorCode, and message is an error
  * string.
- * @returns {boolean} True on success, else false.
  */
-EncryptorV2.prototype.makeAndPublishCkData_ = function(onError)
+EncryptorV2.prototype.makeAndPublishCkData_ = function(onReady, onError)
 {
   try {
     var kek = new PublicKey(this.kekData_.getContent());
@@ -533,16 +533,22 @@ EncryptorV2.prototype.makeAndPublishCkData_ = function(onError)
     // FreshnessPeriod can serve as a soft access control for revoking access.
     ckData.getMetaInfo().setFreshnessPeriod
       (EncryptorV2.DEFAULT_CK_FRESHNESS_PERIOD_MS);
-    // Debug: Use a Promise.
-    this.keyChain_.sign(ckData, this.ckDataSigningInfo_);
-    this.storage_.insert(ckData);
+    var thisEncryptor = this;
+    this.keyChain_.signPromise(ckData, this.ckDataSigningInfo_)
+      .then(function() {
+      thisEncryptor.storage_.insert(ckData);
 
-    if (LOG > 3) console.log("Publishing CK data: " + ckData.getName().toUri());
-    return true;
+      if (LOG > 3) console.log("Publishing CK data: " + ckData.getName().toUri());
+      onReady();
+      return SyncPromise.resolve();
+    })
+    .catch(function(err) {
+      onError(EncryptError.ErrorCode.EncryptionFailure,
+        "Failed to sign CK data " + ckData.getName().toUri() + ": " + err);
+    });
   } catch (ex) {
     onError(EncryptError.ErrorCode.EncryptionFailure,
       "Failed to encrypt generated CK with KEK " + this.kekData_.getName().toUri());
-    return false;
   }
 };
 
@@ -710,47 +716,47 @@ EncryptorV2.prototype.decryptGckAndProcessPendingDecrypts_ = function
     return;
   }
 
-  var decryptedCkBits;
-  try {
-    // Debug: Use a Promise.
-    decryptedCkBits = SyncPromise.getValue(this.keyChain_.getTpm().decryptPromise
-      (content.getPayload().buf(), this.credentialsKey_.getName(), true));
-  } catch (ex) {
-    this.isGckRetrievalInProgress_ = false;
-    onError(EncryptError.ErrorCode.DecryptionFailure,
-      "Error decrypting the GCK: " + ex);
-    return;
-  }
-  if (decryptedCkBits.isNull()) {
-    this.isGckRetrievalInProgress_ = false;
-    onError(EncryptError.ErrorCode.TpmKeyNotFound,
-      "Could not decrypt secret, " + this.credentialsKey_.getName().toUri() +
-      " not found in TPM");
-    return;
-  }
-
-  if (decryptedCkBits.size() != this.ckBits_.length) {
-    this.isGckRetrievalInProgress_ = false;
-    onError(EncryptError.ErrorCode.DecryptionFailure,
-      "The decrypted group content key is not the correct size for the encryption algorithm");
-    return;
-  }
-  this.ckName_ = new Name(gckName);
-  decryptedCkBits.buf().copy(this.ckBits_);
-  this.isGckRetrievalInProgress_ = false;
-
-  for (var i in this.pendingEncrypts_) {
-    var pendingEncrypt = this.pendingEncrypts_[i];
-    // TODO: If this calls onError, should we quit?
-    var encryptedContent = this.encrypt(pendingEncrypt.plainData);
-    try {
-      pendingEncrypt.onSuccess(encryptedContent);
-    } catch (ex) {
-      console.log("Error in onSuccess: " + NdnCommon.getErrorWithStackTrace(ex));
+  var thisEncryptor = this;
+  this.keyChain_.getTpm().decryptPromise
+    (content.getPayload().buf(), this.credentialsKey_.getName())
+  .then(function(decryptedCkBits) {
+    if (decryptedCkBits.isNull()) {
+      thisEncryptor.isGckRetrievalInProgress_ = false;
+      onError(EncryptError.ErrorCode.TpmKeyNotFound,
+        "Could not decrypt secret, " + thisEncryptor.credentialsKey_.getName().toUri() +
+        " not found in TPM");
+      return SyncPromise.resolve();
     }
-  }
 
-  this.pendingEncrypts = [];
+    if (decryptedCkBits.size() != thisEncryptor.ckBits_.length) {
+      thisEncryptor.isGckRetrievalInProgress_ = false;
+      onError(EncryptError.ErrorCode.DecryptionFailure,
+        "The decrypted group content key is not the correct size for the encryption algorithm");
+      return SyncPromise.resolve();
+    }
+    thisEncryptor.ckName_ = new Name(gckName);
+    decryptedCkBits.buf().copy(thisEncryptor.ckBits_);
+    thisEncryptor.isGckRetrievalInProgress_ = false;
+
+    for (var i in thisEncryptor.pendingEncrypts_) {
+      var pendingEncrypt = thisEncryptor.pendingEncrypts_[i];
+      // TODO: If this calls onError, should we quit?
+      var encryptedContent = thisEncryptor.encrypt(pendingEncrypt.plainData);
+      try {
+        pendingEncrypt.onSuccess(encryptedContent);
+      } catch (ex) {
+        console.log("Error in onSuccess: " + NdnCommon.getErrorWithStackTrace(ex));
+      }
+    }
+
+    thisEncryptor.pendingEncrypts = [];
+    return SyncPromise.resolve();
+  })
+  .catch(function(err) {
+    this.isGckRetrievalInProgress_ = false;
+    onError(EncryptError.ErrorCode.DecryptionFailure,
+      "Error decrypting the GCK: " + err);
+  });
 };
 
 EncryptorV2.prototype.isUsingGck_ = function() { 

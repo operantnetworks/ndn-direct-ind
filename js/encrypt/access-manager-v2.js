@@ -7,7 +7,7 @@
  * Original file: js/encrypt/access-manager-v2.js
  * Original repository: https://github.com/named-data/ndn-js
  *
- * Summary of Changes: Support GCK.
+ * Summary of Changes: Support GCK, async TPM.
  *
  * which was originally released under the LGPL license with the following rights:
  *
@@ -44,6 +44,7 @@ var EncryptAlgorithmType = require('./algo/encrypt-params.js').EncryptAlgorithmT
 var InMemoryStorageRetaining = require('../in-memory-storage/in-memory-storage-retaining.js').InMemoryStorageRetaining; /** @ignore */
 var NdnCommon = require('../util/ndn-common.js').NdnCommon; /** @ignore */
 var EncryptorV2 = require('./encryptor-v2.js').EncryptorV2; /** @ignore */
+var SyncPromise = require('../util/sync-promise.js').SyncPromise; /** @ignore */
 var LOG = require('../log.js').Log.LOG;
 
 /**
@@ -129,17 +130,63 @@ AccessManagerV2.prototype.shutdown = function()
  * the policy.
  * @param {CertificateV2} memberCertificate The certificate that identifies the
  * member to authorize.
- * @return {Data} The published KDK or GCK Data packet.
+ * @param {boolean} useSync (optional) If true then return a SyncPromise which
+ * is already fulfilled. If omitted or false, this may return a SyncPromise or
+ * an async Promise.
+ * @return {Promise|SyncPromise} A promise which returns the published KDK or
+ * GCK Data packet, or a promise rejected with an error.
  */
-AccessManagerV2.prototype.addMember = function(memberCertificate)
+AccessManagerV2.prototype.addMemberPromise = function(memberCertificate, useSync)
 {
   if (this.gckAlgorithmType_ != null)
-    return this.addMemberForGck_(memberCertificate);
+    return this.addMemberForGckPromise_(memberCertificate, useSync);
   else
-    return this.addMemberForKdk_(memberCertificate);
+    return this.addMemberForKdkPromise_(memberCertificate, useSync);
 };
 
-AccessManagerV2.prototype.addMemberForGck_ = function(memberCertificate)
+/**
+ * Authorize a member identified by memberCertificate to decrypt data under
+ * the policy.
+ * @param {CertificateV2} memberCertificate The certificate that identifies the
+ * member to authorize.
+ * @param {function} onComplete (optional) This calls
+ * onComplete(data) with the published KDK or GCK Data packet. If omitted, the
+ * return value is described below. (Some crypto libraries only use a callback,
+ * so onComplete is required to use these.)
+ * NOTE: The library will log any exceptions thrown by this callback, but for
+ * better error handling the callback should catch and properly handle any
+ * exceptions.
+ * @param {function} onError (optional) If defined, then onComplete must be
+ * defined and if there is an exception, then this calls onError(exception)
+ * with the exception. If onComplete is defined but onError is undefined, then
+ * this will log any thrown exception. (Some crypto libraries only use a
+ * callback, so onError is required to be notified of an exception.)
+ * NOTE: The library will log any exceptions thrown by this callback, but for
+ * better error handling the callback should catch and properly handle any
+ * exceptions.
+ * @return {Data} If onComplete is omitted, return the published KDK or GCK Data
+ * packet. Otherwise, if onComplete is supplied then return undefined and use
+ * onComplete as described above.
+ */
+AccessManagerV2.prototype.addMember = function(memberCertificate, onComplete, onError)
+{
+  return SyncPromise.complete(onComplete, onError,
+    this.addMemberPromise(memberCertificate, !onComplete));
+};
+
+/**
+ * Authorize a member for GCK identified by memberCertificate to decrypt data
+ * under the policy.
+ * @param {CertificateV2} memberCertificate The certificate that identifies the
+ * member to authorize.
+ * @param {boolean} useSync (optional) If true then return a SyncPromise which
+ * is already fulfilled. If omitted or false, this may return a SyncPromise or
+ * an async Promise.
+ * @return {Promise|SyncPromise} A promise which returns the published GCK Data
+ * packet.
+ */
+AccessManagerV2.prototype.addMemberForGckPromise_ = function
+  (memberCertificate, useSync)
 {
   var memberKey = new PublicKey(memberCertificate.getPublicKey());
 
@@ -157,15 +204,28 @@ AccessManagerV2.prototype.addMemberForGck_ = function(memberCertificate)
   // FreshnessPeriod can serve as a soft access control for revoking access.
   gckData.getMetaInfo().setFreshnessPeriod
     (AccessManagerV2.DEFAULT_KDK_FRESHNESS_PERIOD_MS);
-  this.keyChain_.sign(gckData, new SigningInfo(this.identity_));
-
-  if (LOG > 3) console.log("Ready to serve GCK Data packet " << gckData.getName().toUri());
-  this.storage_.insert(gckData);
-
-  return gckData;
+  var thisManager = this;
+  return this.keyChain_.signPromise(gckData, new SigningInfo(this.identity_), useSync)
+  .then(function() {
+    if (LOG > 3) console.log("Ready to serve GCK Data packet " << gckData.getName().toUri());
+    thisManager.storage_.insert(gckData);
+    return SyncPromise.resolve(gckData);
+  });
 };
 
-AccessManagerV2.prototype.addMemberForKdk_ = function(memberCertificate)
+/**
+ * Authorize a member for KDK identified by memberCertificate to decrypt data
+ * under the policy.
+ * @param {CertificateV2} memberCertificate The certificate that identifies the
+ * member to authorize.
+ * @param {boolean} useSync (optional) If true then return a SyncPromise which
+ * is already fulfilled. If omitted or false, this may return a SyncPromise or
+ * an async Promise.
+ * @return {Promise|SyncPromise} A promise which returns the published KDK Data
+ * packet.
+ */
+AccessManagerV2.prototype.addMemberForKdkPromise_ = function
+  (memberCertificate, useSync)
 {
   var kdkName = new Name(this.nacKey_.getIdentityName());
   kdkName
@@ -203,12 +263,12 @@ AccessManagerV2.prototype.addMemberForKdk_ = function(memberCertificate)
   // FreshnessPeriod can serve as a soft access control for revoking access.
   kdkData.getMetaInfo().setFreshnessPeriod
     (AccessManagerV2.DEFAULT_KDK_FRESHNESS_PERIOD_MS);
-  // Debug: Use a Promise.
-  this.keyChain_.sign(kdkData, new SigningInfo(this.identity_));
-
-  this.storage_.insert(kdkData);
-
-  return kdkData;
+  var thisManager = this;
+  return this.keyChain_.signPromise(kdkData, new SigningInfo(this.identity_), useSync)
+  .then(function() {
+    thisManager.storage_.insert(kdkData);
+    return SyncPromise.resolve(kdkData);
+  });
 };
 
 /**
@@ -257,15 +317,15 @@ AccessManagerV2.prototype.initializeForGck_ = function(dataset)
 
   this.refreshGck();
 
-  var thisEncryptor = this;
+  var thisManager = this;
   var onInterest = function(prefix, interest, face, interestFilterId, filter) {
-    if (thisEncryptor.gckLatestPrefix_.isPrefixOf(interest.getName())) {
-      thisEncryptor.publishGckLatestData_(face);
+    if (thisManager.gckLatestPrefix_.isPrefixOf(interest.getName())) {
+      thisManager.publishGckLatestData_(face);
       return;
     }
 
     // Serve from storage.
-    var data = thisEncryptor.storage_.find(interest);
+    var data = thisManager.storage_.find(interest);
     if (data != null) {
       if (LOG > 3) console.log
         ("Serving " + data.getName().toUri() + " from InMemoryStorage");
@@ -322,9 +382,9 @@ AccessManagerV2.prototype.initializeForKdk_ = function(dataset)
   // A KEK looks like a certificate, but doesn't have a ValidityPeriod.
   this.storage_.insert(kekData);
 
-  var thisEncryptor = this;
+  var thisManager = this;
   var serveFromStorage = function(prefix, interest, face, interestFilterId, filter) {
-    var data = thisEncryptor.storage_.find(interest);
+    var data = thisManager.storage_.find(interest);
     if (data != null) {
       if (LOG > 3) console.log
         ("Serving " + data.getName().toUri() + " from InMemoryStorage");
@@ -367,11 +427,17 @@ AccessManagerV2.prototype.publishGckLatestData_ = function(face)
     .append(Name.Component.fromVersion(new Date().getTime())));
   data.getMetaInfo().setFreshnessPeriod(1000);
   data.setContent(this.gckName_.wireEncode());
-  this.keyChain_.sign(data, new SigningInfo(this.identity_));
-
-  if (LOG > 3) console.log("Publish GCK _latest Data packet: " +
-    data.getName().toUri() + ", contents: " + this.gckName_.toUri());
-  face.putData(data);
+  var thisManager = this;
+  this.keyChain_.signPromise(data, new SigningInfo(this.identity_))
+  .then(function() {
+    if (LOG > 3) console.log("Publish GCK _latest Data packet: " +
+      data.getName().toUri() + ", contents: " + thisManager.gckName_.toUri());
+    face.putData(data);
+    return SyncPromise.resolve();
+  })
+  .catch(function(err) {
+    if (LOG > 0) console.log("Error signing GCK _latest Data packet: " + err);
+  });
 };
 
 AccessManagerV2.DEFAULT_KEK_FRESHNESS_PERIOD_MS = 3600 * 1000.0;
