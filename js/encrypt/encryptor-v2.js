@@ -523,7 +523,10 @@ EncryptorV2.prototype.makeAndPublishCkData_ = function(onReady, onError)
 
     var content = new EncryptedContent();
     // Debug: Use a Promise.
+/* See https://github.com/operantnetworks/ndn-direct-ind/issues/12
     var payload = kek.encrypt(this.ckBits_, EncryptAlgorithmType.RsaOaep);
+ */
+    var payload = kek.encrypt(this.ckBits_, EncryptAlgorithmType.RsaPkcs);
     content.setPayload(payload);
 
     var ckData = new Data

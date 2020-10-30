@@ -199,8 +199,10 @@ describe ("TestTpmBackEnds", function() {
 
         var publicKey = new PublicKey(key.derivePublicKey());
 
-        // TODO: Move encrypt to PublicKey?
+/* See https://github.com/operantnetworks/ndn-direct-ind/issues/12
         var cipherText = publicKey.encrypt(content, EncryptAlgorithmType.RsaOaep);
+ */
+        var cipherText = publicKey.encrypt(content, EncryptAlgorithmType.RsaPkcs);
 
         return key.decryptPromise(cipherText.buf());
       })

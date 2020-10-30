@@ -191,7 +191,10 @@ AccessManagerV2.prototype.addMemberForGckPromise_ = function
   var memberKey = new PublicKey(memberCertificate.getPublicKey());
 
   // TODO: Use a promise.
+/* See https://github.com/operantnetworks/ndn-direct-ind/issues/12
   var encryptedData = memberKey.encrypt(this.gckBits_, EncryptAlgorithmType.RsaOaep);
+ */
+  var encryptedData = memberKey.encrypt(this.gckBits_, EncryptAlgorithmType.RsaPkcs);
   var encryptedContent = new EncryptedContent();
   encryptedContent.setPayload(new Blob(encryptedData, false));
 

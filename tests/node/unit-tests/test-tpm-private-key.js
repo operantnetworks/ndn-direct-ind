@@ -211,6 +211,7 @@ describe('TestTpmPrivateKey', function() {
     }
   });
 
+/* See https://github.com/operantnetworks/ndn-direct-ind/issues/12
   it('RsaDecryption', function() {
     var dataSet = this.rsaKeyTestData;
 
@@ -234,6 +235,7 @@ describe('TestTpmPrivateKey', function() {
 
     assert.ok(decryptedText.equals(plainText));
   });
+ */
 
   it('GenerateKey', function() {
     for (var i = 0; i < this.keyTestData.length; ++i) {
