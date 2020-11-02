@@ -75,6 +75,7 @@ DecryptorFixture.prototype = new IdentityManagementFixture();
 DecryptorFixture.prototype.name = "DecryptorFixture";
 
 describe ("TestDecryptorV2", function() {
+/* See https://github.com/operantnetworks/ndn-direct-ind/issues/12
   it("DecryptValid", function() {
     var fixture = new DecryptorFixture(new Name("/first/user"));
 
@@ -97,6 +98,7 @@ describe ("TestDecryptorV2", function() {
     assert.equal(1, nSuccesses[0]);
     assert.equal(0, nFailures[0]);
   });
+ */
 
   it("DecryptInvalid", function() {
     var fixture = new DecryptorFixture(new Name("/not/authorized"));

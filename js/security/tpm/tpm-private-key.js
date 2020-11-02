@@ -424,7 +424,10 @@ TpmPrivateKey.prototype.decryptPromise = function
   }
 
   if (algorithmType == undefined)
+/* See https://github.com/operantnetworks/ndn-direct-ind/issues/12
     algorithmType = EncryptAlgorithmType.RsaOaep;
+ */
+    algorithmType = EncryptAlgorithmType.RsaPkcs;
 
   if (this.keyType_ == null)
     return SyncPromise.reject(new TpmPrivateKey.Error(new Error
