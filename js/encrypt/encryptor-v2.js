@@ -336,7 +336,7 @@ EncryptorV2.prototype.encryptSync_ = function(plainData, onSuccess, onError)
     }
   }
 
-  var encryptedContent = encrypt(plainData);
+  var encryptedContent = this.encrypt(plainData);
   try {
     onSuccess(encryptedContent);
   } catch (ex) {
