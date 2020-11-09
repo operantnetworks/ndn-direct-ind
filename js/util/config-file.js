@@ -21,7 +21,7 @@
 /** @ignore */
 var fs = require('fs'); /** @ignore */
 var path = require('path'); /** @ignore */
-var BasicIdentityStorage = require('../security//identity/basic-identity-storage').BasicIdentityStorage;
+var PibSqlite3 = require('../security/pib/pib-sqlite3').PibSqlite3;
 
 /**
  * A ConfigFile locates, opens, and parses a library configuration file, and
@@ -79,7 +79,7 @@ ConfigFile.prototype.getParsedConfiguration = function() { return this.config_; 
 ConfigFile.findConfigFile_ = function()
 {
   var filePath = path.join
-    (BasicIdentityStorage.getUserHomePath(), ".ndn", "client.conf");
+    (PibSqlite3.getDefaultDatabaseDirectoryPath(), "client.conf");
   try {
     fs.accessSync(filePath, fs.F_OK);
     return filePath;
