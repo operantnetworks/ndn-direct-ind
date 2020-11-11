@@ -529,7 +529,7 @@
  * A copy of the GNU Lesser General Public License is in the file COPYING.
  */
 
-// define a shim require function so that a node/browserify require calls dont cause errors when ndn-js is used via <script> tag
+// define a shim require function so that a node/browserify require calls dont cause errors when NDN-DIRECT-IND is used via <script> tag
 
 /** @ignore */
 var ndn = ndn || {}
@@ -11755,40 +11755,6 @@ WireFormat.prototype.decodeDelegationSet = function(delegationSet, input, copy)
 };
 
 /**
- * Encode the EncryptedContent v1 and return the encoding.  Your derived class
- * should override.
- * @param {EncryptedContent} encryptedContent The EncryptedContent object to
- * encode.
- * @return {Blob} A Blob containing the encoding.
- * @throws Error This always throws an "unimplemented" error. The derived class
- * should override.
- */
-WireFormat.prototype.encodeEncryptedContent = function(encryptedContent)
-{
-  throw new Error
-    ("encodeEncryptedContent is unimplemented in the base WireFormat class. You should use a derived class.");
-};
-
-/**
- * Decode input as an EncryptedContent v1 and set the fields of the
- * encryptedContent object. Your derived class should override.
- * @param {EncryptedContent} encryptedContent The EncryptedContent object
- * whose fields are updated.
- * @param {Buffer} input The buffer with the bytes to decode.
- * @param {boolean} copy (optional) If true, copy from the input when making new
- * Blob values. If false, then Blob values share memory with the input, which
- * must remain unchanged while the Blob values are used. If omitted, use true.
- * @throws Error This always throws an "unimplemented" error. The derived class
- * should override.
- */
-WireFormat.prototype.decodeEncryptedContent = function
-  (encryptedContent, input, copy)
-{
-  throw new Error
-    ("decodeEncryptedContent is unimplemented in the base WireFormat class. You should use a derived class.");
-};
-
-/**
  * Encode the EncryptedContent v2 (used in Name-based Access Control v2) and
  * return the encoding.
  * See https://github.com/named-data/name-based-access-control/blob/new/docs/spec.rst .
@@ -11844,6 +11810,54 @@ WireFormat.setDefaultWireFormat = function(wireFormat)
 WireFormat.getDefaultWireFormat = function()
 {
   return WireFormat.defaultWireFormat;
+};
+
+/**
+ * Convert a UNIX timestamp to ISO time representation with the "T" in the middle.
+ * @param {number} msSince1970 Timestamp as milliseconds since Jan 1, 1970 UTC.
+ * @return {string} The string representation.
+ */
+WireFormat.toIsoString = function(msSince1970)
+{
+  var utcTime = new Date(Math.round(msSince1970));
+  return utcTime.getUTCFullYear() +
+         WireFormat.to2DigitString(utcTime.getUTCMonth() + 1) +
+         WireFormat.to2DigitString(utcTime.getUTCDate()) +
+         "T" +
+         WireFormat.to2DigitString(utcTime.getUTCHours()) +
+         WireFormat.to2DigitString(utcTime.getUTCMinutes()) +
+         WireFormat.to2DigitString(utcTime.getUTCSeconds());
+};
+
+/**
+ * A private method to zero pad an integer to 2 digits.
+ * @param {number} x The number to pad.  Assume it is a non-negative integer.
+ * @return {string} The padded string.
+ */
+WireFormat.to2DigitString = function(x)
+{
+  var result = x.toString();
+  return result.length === 1 ? "0" + result : result;
+};
+
+/**
+ * Convert an ISO time representation with the "T" in the middle to a UNIX
+ * timestamp.
+ * @param {string} timeString The ISO time representation.
+ * @return {number} The timestamp as milliseconds since Jan 1, 1970 UTC.
+ */
+WireFormat.fromIsoString = function(timeString)
+{
+  if (timeString.length != 15 || timeString.substr(8, 1) != 'T')
+    throw new Error("fromIsoString: Format is not the expected yyyymmddThhmmss");
+
+  return Date.UTC
+    (parseInt(timeString.substr(0, 4)),
+     parseInt(timeString.substr(4, 2) - 1),
+     parseInt(timeString.substr(6, 2)),
+     parseInt(timeString.substr(9, 2)),
+     parseInt(timeString.substr(11, 2)),
+     parseInt(timeString.substr(13, 2)));
 };
 
 // Invoke TlvWireFormat to set the default format.
@@ -14027,6 +14041,12 @@ SegmentFetcher.DontVerifySegment = function(data)
 SegmentFetcher.fetch = function
   (face, baseInterest, validatorKeyChain, onComplete, onError, opts, stats)
 {
+  if (validatorKeyChain != null) {
+    onError(SegmentFetcher.ErrorCode.INVALID_KEYCHAIN,
+            "Debug: validatorKeyChain is temporarily not supported. Use null.");
+    return;
+  }
+
   if (opts == null || opts.pipeline === undefined || opts.pipeline === "cubic") {
     if (validatorKeyChain == null || validatorKeyChain instanceof KeyChain)
       new PipelineCubic
@@ -17526,6 +17546,18 @@ WebSocketTransport.prototype.close = function()
 // The Face constructor uses TcpTransport by default which is not available in the browser, so override to WebSocketTransport.
 exports.TcpTransport = require("./transport/web-socket-transport").WebSocketTransport;
 /**
+ * Copyright (C) 2020 Operant Networks, Incorporated.
+ * @author: Jeff Thompson <jefft0@gmail.com>
+ *
+ * This works is based substantially on previous work as listed below:
+ *
+ * Original file: js/name.js
+ * Original repository: https://github.com/named-data/ndn-js
+ *
+ * Summary of Changes: Add findParametersSha256Digest.
+ *
+ * which was originally released under the LGPL license with the following rights:
+ *
  * This class represents a Name as an array of components where each is a byte array.
  * Copyright (C) 2013-2019 Regents of the University of California.
  * @author: Meki Cheraoui, Jeff Thompson <jefft0@remap.ucla.edu>
@@ -18865,6 +18897,26 @@ Name.prototype.match = function(name)
  * true if this name is empty.
  */
 Name.prototype.isPrefixOf = function(name) { return this.match(name); }
+
+/**
+ * Find the index of the ParametersSha256Digest component in this name.
+ * @return {number} The index of the only ParametersSha256Digest component, or
+ * -1 if the name doesn't have a ParametersSha256Digest components, or -2 if the
+ * name has multiple ParametersSha256Digest components.
+ */
+Name.prototype.findParametersSha256Digest = function()
+{
+  var result = -1;
+  for (var i = 0; i < this.components.length; ++i) {
+    if (this.components[i].isParametersSha256Digest()) {
+      if (result !== -1)
+        return -2;
+      result = i;
+    }
+  }
+
+  return result;
+};
 
 /**
  * Get the change count, which is incremented each time this object is changed.
@@ -22992,4545 +23044,6 @@ Certificate.to2DigitString = function(x)
   return result.length === 1 ? "0" + result : result;
 };
 /**
- * Copyright (C) 2014-2019 Regents of the University of California.
- * @author: Jeff Thompson <jefft0@remap.ucla.edu>
- * From ndn-cxx security by Yingdi Yu <yingdi@cs.ucla.edu>.
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU Lesser General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU Lesser General Public License for more details.
- *
- * You should have received a copy of the GNU Lesser General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
- * A copy of the GNU Lesser General Public License is in the file COPYING.
- */
-
-/** @ignore */
-var Data = require('../../data.js').Data; /** @ignore */
-var Name = require('../../name.js').Name; /** @ignore */
-var SecurityException = require('../../security//security-exception.js').SecurityException; /** @ignore */
-var Certificate = require('./certificate.js').Certificate; /** @ignore */
-var WireFormat = require('../../encoding/wire-format.js').WireFormat;
-
-/**
- * @constructor
- */
-var IdentityCertificate = function IdentityCertificate(data)
-{
-  // Call the base constructor.
-  if (data != undefined)
-    // This works if data is Data or IdentityCertificate.
-    Certificate.call(this, data);
-  else
-    Certificate.call(this);
-
-  this.publicKeyName = new Name();
-
-  if (data instanceof IdentityCertificate) {
-    // The copy constructor.
-    this.publicKeyName = new Name(data.publicKeyName);
-  }
-  else if (data instanceof Data) {
-    if (!IdentityCertificate.isCorrectName(data.getName()))
-      throw new SecurityException(new Error("Wrong Identity Certificate Name!"));
-
-    this.setPublicKeyName();
-  }
-};
-IdentityCertificate.prototype = new Certificate();
-IdentityCertificate.prototype.name = "IdentityCertificate";
-
-exports.IdentityCertificate = IdentityCertificate;
-
-/**
- * Override the base class method to check that the name is a valid identity
- * certificate name.
- * @param {Name} name The identity certificate name which is copied.
- * @return {Data} This Data so that you can chain calls to update values.
- */
-IdentityCertificate.prototype.setName = function(name)
-{
-  if (!IdentityCertificate.isCorrectName(name))
-    throw new SecurityException(new Error("Wrong Identity Certificate Name!"));
-
-  // Call the super class method.
-  Certificate.prototype.setName.call(this, name);
-  this.setPublicKeyName();
-  return this;
-};
-
-/**
- * Override to call the base class wireDecode then update the public key name.
- * @param {Blob|Buffer} input The buffer with the bytes to decode.
- * @param {WireFormat} wireFormat (optional) A WireFormat object used to decode
- * this object. If omitted, use WireFormat.getDefaultWireFormat().
- */
-IdentityCertificate.prototype.wireDecode = function(input, wireFormat)
-{
-  wireFormat = (wireFormat || WireFormat.getDefaultWireFormat());
-
-  Certificate.prototype.wireDecode.call(this, input, wireFormat);
-  this.setPublicKeyName();
-};
-
-IdentityCertificate.prototype.getPublicKeyName = function()
-{
-  return this.publicKeyName;
-};
-
-IdentityCertificate.isIdentityCertificate = function(certificate)
-{
-  return IdentityCertificate.isCorrectName(certificate.getName());
-};
-
-/**
- * Get the public key name from the full certificate name.
- * @param {Name} certificateName The full certificate name.
- * @return {Name} The related public key name.
- */
-IdentityCertificate.certificateNameToPublicKeyName = function(certificateName)
-{
-  var idString = "ID-CERT";
-  var foundIdString = false;
-  var idCertComponentIndex = certificateName.size() - 1;
-  for (; idCertComponentIndex + 1 > 0; --idCertComponentIndex) {
-    if (certificateName.get(idCertComponentIndex).toEscapedString() == idString) {
-      foundIdString = true;
-      break;
-    }
-  }
-
-  if (!foundIdString)
-    throw new Error
-      ("Incorrect identity certificate name " + certificateName.toUri());
-
-  var tempName = certificateName.getSubName(0, idCertComponentIndex);
-  var keyString = "KEY";
-  var foundKeyString = false;
-  var keyComponentIndex = 0;
-  for (; keyComponentIndex < tempName.size(); keyComponentIndex++) {
-    if (tempName.get(keyComponentIndex).toEscapedString() == keyString) {
-      foundKeyString = true;
-      break;
-    }
-  }
-
-  if (!foundKeyString)
-    throw new Error
-      ("Incorrect identity certificate name " + certificateName.toUri());
-
-  return tempName
-    .getSubName(0, keyComponentIndex)
-    .append(tempName.getSubName
-            (keyComponentIndex + 1, tempName.size() - keyComponentIndex - 1));
-};
-
-IdentityCertificate.isCorrectName = function(name)
-{
-  var i = name.size() - 1;
-
-  var idString = "ID-CERT";
-  for (; i >= 0; i--) {
-    if (name.get(i).toEscapedString() == idString)
-      break;
-  }
-
-  if (i < 0)
-    return false;
-
-  var keyIdx = 0;
-  var keyString = "KEY";
-  for (; keyIdx < name.size(); keyIdx++) {
-    if(name.get(keyIdx).toEscapedString() == keyString)
-      break;
-  }
-
-  if (keyIdx >= name.size())
-    return false;
-
-  return true;
-};
-
-IdentityCertificate.prototype.setPublicKeyName = function()
-{
-  this.publicKeyName = IdentityCertificate.certificateNameToPublicKeyName
-    (this.getName());
-};
-
-/**
- * Copyright (C) 2014-2019 Regents of the University of California.
- * @author: Jeff Thompson <jefft0@remap.ucla.edu>
- * From ndn-cxx security by Yingdi Yu <yingdi@cs.ucla.edu>.
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU Lesser General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU Lesser General Public License for more details.
- *
- * You should have received a copy of the GNU Lesser General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
- * A copy of the GNU Lesser General Public License is in the file COPYING.
- */
-
-/** @ignore */
-var Name = require('../../name.js').Name; /** @ignore */
-var SecurityException = require('../security-exception.js').SecurityException; /** @ignore */
-var SyncPromise = require('../../util/sync-promise.js').SyncPromise;
-
-/**
- * IdentityStorage is a base class for the storage of identity, public keys and
- * certificates. Private keys are stored in PrivateKeyStorage.
- * This is an abstract base class.  A subclass must implement the methods.
- * @constructor
- */
-var IdentityStorage = function IdentityStorage()
-{
-};
-
-exports.IdentityStorage = IdentityStorage;
-
-/**
- * Check if the specified identity already exists.
- * @param {Name} identityName The identity name.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise which returns true if the identity
- * exists.
- */
-IdentityStorage.prototype.doesIdentityExistPromise = function
-  (identityName, useSync)
-{
-  return SyncPromise.reject(new Error
-    ("IdentityStorage.doesIdentityExistPromise is not implemented"));
-};
-
-/**
- * Check if the specified identity already exists.
- * @param {Name} identityName The identity name.
- * @return {boolean} true if the identity exists, otherwise false.
- * @throws Error If doesIdentityExistPromise doesn't return a SyncPromise which
- * is already fulfilled.
- */
-IdentityStorage.prototype.doesIdentityExist = function(identityName)
-{
-  return SyncPromise.getValue(this.doesIdentityExistPromise(identityName, true));
-};
-
-/**
- * Add a new identity. Do nothing if the identity already exists.
- * @param {Name} identityName The identity name to be added.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise which fulfills when the identity is
- * added.
- */
-IdentityStorage.prototype.addIdentityPromise = function(identityName, useSync)
-{
-  return SyncPromise.reject(new Error
-    ("IdentityStorage.addIdentityPromise is not implemented"));
-};
-
-/**
- * Add a new identity. Do nothing if the identity already exists.
- * @param {Name} identityName The identity name to be added.
- * @throws Error If addIdentityPromise doesn't return a SyncPromise which
- * is already fulfilled.
- */
-IdentityStorage.prototype.addIdentity = function(identityName)
-{
-  return SyncPromise.getValue(this.addIdentityPromise(identityName, true));
-};
-
-/**
- * Revoke the identity.
- * @return {boolean} true if the identity was revoked, false if not.
- */
-IdentityStorage.prototype.revokeIdentity = function()
-{
-  return SyncPromise.reject(new Error
-    ("IdentityStorage.revokeIdentity is not implemented"));
-};
-
-/**
- * Generate a name for a new key belonging to the identity.
- * @param {Name} identityName The identity name.
- * @param {boolean} useKsk If true, generate a KSK name, otherwise a DSK name.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise that returns the generated key Name.
- */
-IdentityStorage.prototype.getNewKeyNamePromise = function
-  (identityName, useKsk, useSync)
-{
-  var timestamp = Math.floor(new Date().getTime() / 1000.0);
-  while (timestamp <= IdentityStorage.lastTimestamp)
-    // Make the timestamp unique.
-    timestamp += 1;
-  IdentityStorage.lastTimestamp = timestamp;
-
-  // Get the number of seconds as a string.
-  var seconds = "" + timestamp;
-
-  var keyIdStr;
-  if (useKsk)
-    keyIdStr = "ksk-" + seconds;
-  else
-    keyIdStr = "dsk-" + seconds;
-
-  var keyName = new Name(identityName).append(keyIdStr);
-
-  return this.doesKeyExistPromise(keyName, useSync)
-  .then(function(exists) {
-    if (exists)
-      throw new SecurityException(new Error("Key name already exists"));
-
-    return SyncPromise.resolve(keyName);
-  });
-};
-
-/**
- * Generate a name for a new key belonging to the identity.
- * @param {Name} identityName The identity name.
- * @param {boolean} useKsk If true, generate a KSK name, otherwise a DSK name.
- * @return {Name} The generated key name.
- * @throws Error If getNewKeyNamePromise doesn't return a SyncPromise which
- * is already fulfilled.
- */
-IdentityStorage.prototype.getNewKeyName = function(identityName, useKsk)
-{
-  return SyncPromise.getValue
-    (this.getNewKeyNamePromise(identityName, useKsk, true));
-};
-
-/**
- * Check if the specified key already exists.
- * @param {Name} keyName The name of the key.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise which returns true if the key exists.
- */
-IdentityStorage.prototype.doesKeyExistPromise = function(keyName, useSync)
-{
-  return SyncPromise.reject(new Error
-    ("IdentityStorage.doesKeyExistPromise is not implemented"));
-};
-
-/**
- * Check if the specified key already exists.
- * @param {Name} keyName The name of the key.
- * @return {boolean} true if the key exists, otherwise false.
- * @throws Error If doesKeyExistPromise doesn't return a SyncPromise which
- * is already fulfilled.
- */
-IdentityStorage.prototype.doesKeyExist = function(keyName)
-{
-  return SyncPromise.getValue(this.doesKeyExistPromise(keyName, true));
-};
-
-/**
- * Add a public key to the identity storage. Also call addIdentity to ensure
- * that the identityName for the key exists. However, if the key already
- * exists, do nothing.
- * @param {Name} keyName The name of the public key to be added.
- * @param {number} keyType Type of the public key to be added from KeyType, such
- * as KeyType.RSA..
- * @param {Blob} publicKeyDer A blob of the public key DER to be added.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise which fulfills when complete.
- */
-IdentityStorage.prototype.addKeyPromise = function
-  (keyName, keyType, publicKeyDer, useSync)
-{
-  return SyncPromise.reject(new Error
-    ("IdentityStorage.addKeyPromise is not implemented"));
-};
-
-/**
- * Add a public key to the identity storage. Also call addIdentity to ensure
- * that the identityName for the key exists.
- * @param {Name} keyName The name of the public key to be added.
- * @param {number} keyType Type of the public key to be added from KeyType, such
- * as KeyType.RSA..
- * @param {Blob} publicKeyDer A blob of the public key DER to be added.
- * @throws SecurityException if a key with the keyName already exists.
- * @throws Error If addKeyPromise doesn't return a SyncPromise which
- * is already fulfilled.
- */
-IdentityStorage.prototype.addKey = function(keyName, keyType, publicKeyDer)
-{
-  return SyncPromise.getValue
-    (this.addKeyPromise(keyName, keyType, publicKeyDer, true));
-};
-
-/**
- * Get the public key DER blob from the identity storage.
- * @param {Name} keyName The name of the requested public key.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise which returns the DER Blob, or a
- * promise rejected with SecurityException if the key doesn't exist.
- */
-IdentityStorage.prototype.getKeyPromise = function(keyName, useSync)
-{
-  return SyncPromise.reject(new Error
-    ("IdentityStorage.getKeyPromise is not implemented"));
-};
-
-/**
- * Get the public key DER blob from the identity storage.
- * @param {Name} keyName The name of the requested public key.
- * @return {Blob} The DER Blob.
- * @throws SecurityException if the key doesn't exist.
- * @throws Error If getKeyPromise doesn't return a SyncPromise which
- * is already fulfilled.
- */
-IdentityStorage.prototype.getKey = function(keyName)
-{
-  return SyncPromise.getValue(this.getKeyPromise(keyName, true));
-};
-
-/**
- * Activate a key.  If a key is marked as inactive, its private part will not be
- * used in packet signing.
- * @param {Name} keyName name of the key
- */
-IdentityStorage.prototype.activateKey = function(keyName)
-{
-  throw new Error("IdentityStorage.activateKey is not implemented");
-};
-
-/**
- * Deactivate a key. If a key is marked as inactive, its private part will not
- * be used in packet signing.
- * @param {Name} keyName name of the key
- */
-IdentityStorage.prototype.deactivateKey = function(keyName)
-{
-  throw new Error("IdentityStorage.deactivateKey is not implemented");
-};
-
-/**
- * Check if the specified certificate already exists.
- * @param {Name} certificateName The name of the certificate.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise which returns true if the certificate
- * exists.
- */
-IdentityStorage.prototype.doesCertificateExistPromise = function
-  (certificateName, useSync)
-{
-  return SyncPromise.reject(new Error
-    ("IdentityStorage.doesCertificateExistPromise is not implemented"));
-};
-
-/**
- * Check if the specified certificate already exists.
- * @param {Name} certificateName The name of the certificate.
- * @return {boolean} true if the certificate exists, otherwise false.
- * @throws Error If doesCertificateExistPromise doesn't return a SyncPromise
- * which is already fulfilled.
- */
-IdentityStorage.prototype.doesCertificateExist = function(certificateName)
-{
-  return SyncPromise.getValue
-    (this.doesCertificateExistPromise(certificateName, true));
-};
-
-/**
- * Add a certificate to the identity storage. Also call addKey to ensure that
- * the certificate key exists. If the certificate is already installed, don't
- * replace it.
- * @param {IdentityCertificate} certificate The certificate to be added.  This
- * makes a copy of the certificate.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise which fulfills when finished.
- */
-IdentityStorage.prototype.addCertificatePromise = function(certificate, useSync)
-{
-  return SyncPromise.reject(new Error
-    ("IdentityStorage.addCertificatePromise is not implemented"));
-};
-
-/**
- * Add a certificate to the identity storage.
- * @param {IdentityCertificate} certificate The certificate to be added.  This
- * makes a copy of the certificate.
- * @throws SecurityException if the certificate is already installed.
- * @throws Error If addCertificatePromise doesn't return a SyncPromise which
- * is already fulfilled.
- */
-IdentityStorage.prototype.addCertificate = function(certificate)
-{
-  return SyncPromise.getValue(this.addCertificatePromise(certificate, true));
-};
-
-/**
- * Get a certificate from the identity storage.
- * @param {Name} certificateName The name of the requested certificate.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise which returns the requested
- * IdentityCertificate, or a promise rejected with SecurityException if the
- * certificate doesn't exist.
- */
-IdentityStorage.prototype.getCertificatePromise = function
-  (certificateName, useSync)
-{
-  return SyncPromise.reject(new Error
-    ("IdentityStorage.getCertificatePromise is not implemented"));
-};
-
-/**
- * Get a certificate from the identity storage.
- * @param {Name} certificateName The name of the requested certificate.
- * @return {IdentityCertificate} The requested certificate.
- * @throws SecurityException if the certificate doesn't exist.
- * @throws Error If getCertificatePromise doesn't return a SyncPromise which
- * is already fulfilled.
- */
-IdentityStorage.prototype.getCertificate = function(certificateName)
-{
-  return SyncPromise.getValue(this.getValuePromise(certificateName, true));
-};
-
-/**
- * Get the TPM locator associated with this storage.
- * @param {boolean} useSync (optional) If true then return a rejected promise
- * since this only supports async code.
- * @return {Promise|SyncPromise} A promise which returns the TPM locator, or a
- * promise rejected with SecurityException if the TPM locator doesn't exist.
- */
-IdentityStorage.prototype.getTpmLocatorPromise = function(useSync)
-{
-  return SyncPromise.reject(new Error
-    ("IdentityStorage.getTpmLocatorPromise is not implemented"));
-};
-
-/**
- * Get the TPM locator associated with this storage.
- * @return {string} The TPM locator.
- * @throws SecurityException if the TPM locator doesn't exist.
- * @throws Error If getTpmLocatorPromise doesn't return a SyncPromise which is
- * already fulfilled.
- */
-IdentityStorage.prototype.getTpmLocator = function()
-{
-  return SyncPromise.getValue(this.getTpmLocatorPromise(true));
-};
-
-/*****************************************
- *           Get/Set Default             *
- *****************************************/
-
-/**
- * Get the default identity.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise which returns the Name of default
- * identity, or a promise rejected with SecurityException if the default
- * identity is not set.
- */
-IdentityStorage.prototype.getDefaultIdentityPromise = function(useSync)
-{
-  return SyncPromise.reject(new Error
-    ("IdentityStorage.getDefaultIdentityPromise is not implemented"));
-};
-
-/**
- * Get the default identity.
- * @return {Name} The name of default identity.
- * @throws SecurityException if the default identity is not set.
- * @throws Error If getDefaultIdentityPromise doesn't return a SyncPromise
- * which is already fulfilled.
- */
-IdentityStorage.prototype.getDefaultIdentity = function()
-{
-  return SyncPromise.getValue
-    (this.getDefaultIdentityPromise(true));
-};
-
-/**
- * Get the default key name for the specified identity.
- * @param {Name} identityName The identity name.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise which returns the default key Name,
- * or a promise rejected with SecurityException if the default key name for the
- * identity is not set.
- */
-IdentityStorage.prototype.getDefaultKeyNameForIdentityPromise = function
-  (identityName, useSync)
-{
-  return SyncPromise.reject(new Error
-    ("IdentityStorage.getDefaultKeyNameForIdentityPromise is not implemented"));
-};
-
-/**
- * Get the default key name for the specified identity.
- * @param {Name} identityName The identity name.
- * @return {Name} The default key name.
- * @throws SecurityException if the default key name for the identity is not set.
- * @throws Error If getDefaultKeyNameForIdentityPromise doesn't return a
- * SyncPromise which is already fulfilled.
- */
-IdentityStorage.prototype.getDefaultKeyNameForIdentity = function(identityName)
-{
-  return SyncPromise.getValue
-    (this.getDefaultKeyNameForIdentityPromise(identityName, true));
-};
-
-/**
- * Get the default certificate name for the specified identity.
- * @param {Name} identityName The identity name.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise which returns the default certificate
- * Name, or a promise rejected with SecurityException if the default key name
- * for the identity is not set or the default certificate name for the key name
- * is not set.
- */
-IdentityStorage.prototype.getDefaultCertificateNameForIdentityPromise = function
-  (identityName, useSync)
-{
-  var thisStorage = this;
-  return this.getDefaultKeyNameForIdentityPromise(identityName)
-  .then(function(keyName) {
-    return thisStorage.getDefaultCertificateNameForKeyPromise(keyName);
-  });
-};
-
-/**
- * Get the default certificate name for the specified identity.
- * @param {Name} identityName The identity name.
- * @return {Name} The default certificate name.
- * @throws SecurityException if the default key name for the identity is not
- * set or the default certificate name for the key name is not set.
- * @throws Error If getDefaultCertificateNameForIdentityPromise doesn't return
- * a SyncPromise which is already fulfilled.
- */
-IdentityStorage.prototype.getDefaultCertificateNameForIdentity = function
-  (identityName)
-{
-  return SyncPromise.getValue
-    (this.getDefaultCertificateNameForIdentityPromise(identityName, true));
-};
-
-/**
- * Get the default certificate name for the specified key.
- * @param {Name} keyName The key name.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise which returns the default certificate
- * Name, or a promise rejected with SecurityException if the default certificate
- * name for the key name is not set.
- */
-IdentityStorage.prototype.getDefaultCertificateNameForKeyPromise = function
-  (keyName, useSync)
-{
-  return SyncPromise.reject(new Error
-    ("IdentityStorage.getDefaultCertificateNameForKeyPromise is not implemented"));
-};
-
-/**
- * Get the default certificate name for the specified key.
- * @param {Name} keyName The key name.
- * @return {Name} The default certificate name.
- * @throws SecurityException if the default certificate name for the key name
- * is not set.
- * @throws Error If getDefaultCertificateNameForKeyPromise doesn't return a
- * SyncPromise which is already fulfilled.
- */
-IdentityStorage.prototype.getDefaultCertificateNameForKey = function(keyName)
-{
-  return SyncPromise.getValue
-    (this.getDefaultCertificateNameForKeyPromise(keyName, true));
-};
-
-/**
- * Append all the identity names to the nameList.
- * @param {Array<Name>} nameList Append result names to nameList.
- * @param {boolean} isDefault If true, add only the default identity name. If
- * false, add only the non-default identity names.
- * @param {boolean} useSync (optional) If true then return a rejected promise
- * since this only supports async code.
- * @return {Promise} A promise which fulfills when the names are added to
- * nameList.
- */
-IdentityStorage.prototype.getAllIdentitiesPromise = function
-  (nameList, isDefault, useSync)
-{
-  return SyncPromise.reject(new Error
-    ("IdentityStorage.getAllIdentitiesPromise is not implemented"));
-};
-
-/**
- * Append all the key names of a particular identity to the nameList.
- * @param {Name} identityName The identity name to search for.
- * @param {Array<Name>} nameList Append result names to nameList.
- * @param {boolean} isDefault If true, add only the default key name. If false,
- * add only the non-default key names.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise which fulfills when the names are
- * added to nameList.
- */
-IdentityStorage.prototype.getAllKeyNamesOfIdentityPromise = function
-  (identityName, nameList, isDefault, useSync)
-{
-  return SyncPromise.reject(new Error
-    ("IdentityStorage.getAllKeyNamesOfIdentityPromise is not implemented"));
-};
-
-/**
- * Append all the certificate names of a particular key name to the nameList.
- * @param {Name} keyName The key name to search for.
- * @param {Array<Name>} nameList Append result names to nameList.
- * @param {boolean} isDefault If true, add only the default certificate name.
- * If false, add only the non-default certificate names.
- * @param {boolean} useSync (optional) If true then return a rejected promise
- * since this only supports async code.
- * @return {Promise} A promise which fulfills when the names are added to
- * nameList.
- */
-IdentityStorage.prototype.getAllCertificateNamesOfKeyPromise = function
-  (keyName, nameList, isDefault, useSync)
-{
-  return SyncPromise.reject(new Error
-    ("IdentityStorage.getAllCertificateNamesOfKeyPromise is not implemented"));
-};
-
-/**
- * Append all the key names of a particular identity to the nameList.
- * @param {Name} identityName The identity name to search for.
- * @param {Array<Name>} nameList Append result names to nameList.
- * @param {boolean} isDefault If true, add only the default key name. If false,
- * add only the non-default key names.
- * @throws Error If getAllKeyNamesOfIdentityPromise doesn't return a
- * SyncPromise which is already fulfilled.
- */
-IdentityStorage.prototype.getAllKeyNamesOfIdentity = function
-  (identityName, nameList, isDefault)
-{
-  return SyncPromise.getValue
-    (this.getAllKeyNamesOfIdentityPromise(identityName, nameList, isDefault, true));
-};
-
-/**
- * Set the default identity.  If the identityName does not exist, then clear the
- * default identity so that getDefaultIdentity() throws an exception.
- * @param {Name} identityName The default identity name.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise which fulfills when the default
- * identity is set.
- */
-IdentityStorage.prototype.setDefaultIdentityPromise = function
-  (identityName, useSync)
-{
-  return SyncPromise.reject(new Error
-    ("IdentityStorage.setDefaultIdentityPromise is not implemented"));
-};
-
-/**
- * Set the default identity.  If the identityName does not exist, then clear the
- * default identity so that getDefaultIdentity() throws an exception.
- * @param {Name} identityName The default identity name.
- * @throws Error If setDefaultIdentityPromise doesn't return a SyncPromise which
- * is already fulfilled.
- */
-IdentityStorage.prototype.setDefaultIdentity = function(identityName)
-{
-  return SyncPromise.getValue
-    (this.setDefaultIdentityPromise(identityName, true));
-};
-
-/**
- * Set a key as the default key of an identity. The identity name is inferred
- * from keyName.
- * @param {Name} keyName The name of the key.
- * @param {Name} identityNameCheck (optional) The identity name to check that the
- * keyName contains the same identity name. If an empty name, it is ignored.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise which fulfills when the default key
- * name is set.
- */
-IdentityStorage.prototype.setDefaultKeyNameForIdentityPromise = function
-  (keyName, identityNameCheck, useSync)
-{
-  return SyncPromise.reject(new Error
-    ("IdentityStorage.setDefaultKeyNameForIdentityPromise is not implemented"));
-};
-
-/**
- * Set a key as the default key of an identity. The identity name is inferred
- * from keyName.
- * @param {Name} keyName The name of the key.
- * @param {Name} identityNameCheck (optional) The identity name to check that the
- * keyName contains the same identity name. If an empty name, it is ignored.
- * @throws Error If setDefaultKeyNameForIdentityPromise doesn't return a
- * SyncPromise which is already fulfilled.
- */
-IdentityStorage.prototype.setDefaultKeyNameForIdentity = function
-  (keyName, identityNameCheck)
-{
-  return SyncPromise.getValue
-    (this.setDefaultKeyNameForIdentityPromise(keyName, identityNameCheck, true));
-};
-
-/**
- * Set the default key name for the specified identity.
- * @param {Name} keyName The key name.
- * @param {Name} certificateName The certificate name.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise which fulfills when the default
- * certificate name is set.
- */
-IdentityStorage.prototype.setDefaultCertificateNameForKeyPromise = function
-  (keyName, certificateName, useSync)
-{
-  return SyncPromise.reject(new Error
-    ("IdentityStorage.setDefaultCertificateNameForKeyPromise is not implemented"));
-};
-
-/**
- * Set the default key name for the specified identity.
- * @param {Name} keyName The key name.
- * @param {Name} certificateName The certificate name.
- * @throws Error If setDefaultCertificateNameForKeyPromise doesn't return a
- * SyncPromise which is already fulfilled.
- */
-IdentityStorage.prototype.setDefaultCertificateNameForKey = function
-  (keyName, certificateName)
-{
-  return SyncPromise.getValue
-    (this.setDefaultCertificateNameForKeyPromise(keyName, certificateName, true));
-};
-
-/**
- * Get the certificate of the default identity.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise which returns the requested
- * IdentityCertificate or null if not found.
- */
-IdentityStorage.prototype.getDefaultCertificatePromise = function(useSync)
-{
-  var thisStorage = this;
-  return this.getDefaultIdentityPromise(useSync)
-  .then(function(identityName) {
-    return thisStorage.getDefaultCertificateNameForIdentityPromise
-      (identityName, useSync);
-  }, function(ex) {
-    // The default is not defined.
-    return SyncPromise.resolve(null);
-  })
-  .then(function(certName) {
-    if (certName == null)
-      return SyncPromise.resolve(null);
-
-    return thisStorage.getCertificatePromise(certName, useSync);
-  });
-};
-
-/**
- * Get the certificate of the default identity.
- * @return {IdentityCertificate} The requested certificate.  If not found,
- * return null.
- * @throws Error If getDefaultCertificatePromise doesn't return a SyncPromise
- * which is already fulfilled.
- */
-IdentityStorage.prototype.getDefaultCertificate = function()
-{
-  return SyncPromise.getValue
-    (this.getDefaultCertificatePromise(true));
-};
-
-/*****************************************
- *            Delete Methods             *
- *****************************************/
-
-/**
- * Delete a certificate.
- * @param {Name} certificateName The certificate name.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise which fulfills when the certificate
- * info is deleted.
- */
-IdentityStorage.prototype.deleteCertificateInfoPromise = function
-  (certificateName, useSync)
-{
-  return SyncPromise.reject(new Error
-    ("IdentityStorage.deleteCertificateInfoPromise is not implemented"));
-};
-
-/**
- * Delete a certificate.
- * @param {Name} certificateName The certificate name.
- * @throws Error If deleteCertificateInfoPromise doesn't return a SyncPromise
- * which is already fulfilled.
- */
-IdentityStorage.prototype.deleteCertificateInfo = function(certificateName)
-{
-  return SyncPromise.getValue
-    (this.deleteCertificateInfoPromise(certificateName, true));
-};
-
-/**
- * Delete a public key and related certificates.
- * @param {Name} keyName The key name.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise which fulfills when the public key
- * info is deleted.
- */
-IdentityStorage.prototype.deletePublicKeyInfoPromise = function(keyName, useSync)
-{
-  return SyncPromise.reject
-    (new Error("IdentityStorage.deletePublicKeyInfoPromise is not implemented"));
-};
-
-/**
- * Delete a public key and related certificates.
- * @param {Name} keyName The key name.
- * @throws Error If deletePublicKeyInfoPromise doesn't return a SyncPromise
- * which is already fulfilled.
- */
-IdentityStorage.prototype.deletePublicKeyInfo = function(keyName)
-{
-  return SyncPromise.getValue
-    (this.deletePublicKeyInfoPromise(keyName, true));
-};
-
-/**
- * Delete an identity and related public keys and certificates.
- * @param {Name} identityName The identity name.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise which fulfills when the identity info
- * is deleted.
- */
-IdentityStorage.prototype.deleteIdentityInfoPromise = function
-  (identityName, useSync)
-{
-  return SyncPromise.reject(new Error
-    ("IdentityStorage.deleteIdentityInfoPromise is not implemented"));
-};
-
-/**
- * Delete an identity and related public keys and certificates.
- * @param {Name} identityName The identity name.
- * @throws Error If deleteIdentityInfoPromise doesn't return a SyncPromise
- * which is already fulfilled.
- */
-IdentityStorage.prototype.deleteIdentityInfo = function(identityName)
-{
-  return SyncPromise.getValue
-    (this.deleteIdentityInfoPromise(identityName, true));
-};
-
-// Track the lastTimestamp so that each timestamp is unique.
-IdentityStorage.lastTimestamp = Math.floor(new Date().getTime() / 1000.0);
-/**
- * Copyright (C) 2015-2019 Regents of the University of California.
- * @author: Jeff Thompson <jefft0@remap.ucla.edu>
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU Lesser General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU Lesser General Public License for more details.
- *
- * You should have received a copy of the GNU Lesser General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
- * A copy of the GNU Lesser General Public License is in the file COPYING.
- */
-
-// Don't require modules since this is meant for the browser, not Node.js.
-
-/**
- * IndexedDbIdentityStorage extends IdentityStorage and implements its methods
- * to store identity, public key and certificate objects using the browser's
- * IndexedDB service.
- * @constructor
- */
-var IndexedDbIdentityStorage = function IndexedDbIdentityStorage()
-{
-  IdentityStorage.call(this);
-
-  this.database = new Dexie("ndnsec-public-info");
-  // The database schema imitates MemoryIdentityStorage.
-  this.database.version(1).stores({
-    // A table for global values. It currently only has the defaultIdentityUri.
-    // "key" is the key like "defaultIdentityUri" // string
-    // "value" is the value. For "defaultIdentityUri" the value is the
-    //         default identity name URI, or absent if not defined. // string
-    globals: "key",
-
-    // "identityNameUri" is the identity name URI          // string
-    // "defaultKeyUri" is the default key name URI or null // string
-    identity: "identityNameUri",
-
-    // "keyNameUri" is the key name URI                             // string
-    // "keyType" is the type of the public key            // number from KeyType
-    // "keyDer" is the public key DER                               // Uint8Array
-    // "defaultCertificateUri" is the default cert name URI or null // string
-    publicKey: "keyNameUri",
-
-    // "certificateNameUri" is the certificate name URI // string
-    // "encoding" is the certificate wire encoding      // Uint8Array
-    certificate: "certificateNameUri"
-  });
-  this.database.open();
-};
-
-IndexedDbIdentityStorage.prototype = new IdentityStorage();
-IndexedDbIdentityStorage.prototype.name = "IndexedDbIdentityStorage";
-
-/**
- * Check if the specified identity already exists.
- * @param {Name} identityName The identity name.
- * @param {boolean} useSync (optional) If true then return a rejected promise
- * since this only supports async code.
- * @return {Promise} A promise which returns true if the identity exists.
- */
-IndexedDbIdentityStorage.prototype.doesIdentityExistPromise = function
-  (identityName, useSync)
-{
-  if (useSync)
-    return Promise.reject(new SecurityException(new Error
-      ("IndexedDbIdentityStorage.doesIdentityExistPromise is only supported for async")));
-
-  return this.database.identity.where("identityNameUri").equals
-    (identityName.toUri())
-  .count()
-  .then(function(count) {
-    return Promise.resolve(count > 0);
-  });
-};
-
-/**
- * Add a new identity. Do nothing if the identity already exists.
- * @param {Name} identityName The identity name to be added.
- * @param {boolean} useSync (optional) If true then return a rejected promise
- * since this only supports async code.
- * @return {Promise} A promise which fulfills when the identity is added.
- */
-IndexedDbIdentityStorage.prototype.addIdentityPromise = function
-  (identityName, useSync)
-{
-  if (useSync)
-    return Promise.reject(new SecurityException(new Error
-      ("IndexedDbIdentityStorage.addIdentityPromise is only supported for async")));
-
-  var thisStorage = this;
-  return this.doesIdentityExistPromise(identityName)
-  .then(function(exists) {
-    if (exists)
-      // Do nothing.
-      return Promise.resolve();
-
-    return thisStorage.database.identity.put
-      ({ identityNameUri: identityName.toUri(), defaultKeyUri: null });
-  });
-};
-
-/**
- * Check if the specified key already exists.
- * @param {Name} keyName The name of the key.
- * @param {boolean} useSync (optional) If true then return a rejected promise
- * since this only supports async code.
- * @return {Promise} A promise which returns true if the key exists.
- */
-IndexedDbIdentityStorage.prototype.doesKeyExistPromise = function
-  (keyName, useSync)
-{
-  if (useSync)
-    return Promise.reject(new SecurityException(new Error
-      ("IndexedDbIdentityStorage.doesKeyExistPromise is only supported for async")));
-
-  return this.database.publicKey.where("keyNameUri").equals(keyName.toUri())
-  .count()
-  .then(function(count) {
-    return Promise.resolve(count > 0);
-  });
-};
-
-/**
- * Add a public key to the identity storage. Also call addIdentity to ensure
- * that the identityName for the key exists. However, if the key already
-   * exists, do nothing.
- * @param {Name} keyName The name of the public key to be added.
- * @param {number} keyType Type of the public key to be added from KeyType, such
- * as KeyType.RSA..
- * @param {Blob} publicKeyDer A blob of the public key DER to be added.
- * @param {boolean} useSync (optional) If true then return a rejected promise
- * since this only supports async code.
- * @return {Promise} A promise which fulfills when complete.
- */
-IndexedDbIdentityStorage.prototype.addKeyPromise = function
-  (keyName, keyType, publicKeyDer, useSync)
-{
-  if (useSync)
-    return Promise.reject(new SecurityException(new Error
-      ("IndexedDbIdentityStorage.addKeyPromise is only supported for async")));
-
-  if (keyName.size() === 0)
-    return Promise.resolve();
-
-  var thisStorage = this;
-  return this.doesKeyExistPromise(keyName)
-  .then(function(exists) {
-    if (exists)
-      return Promise.resolve();
-
-    var identityName = keyName.getPrefix(-1);
-    return thisStorage.addIdentityPromise(identityName)
-    .then(function() {
-      return thisStorage.database.publicKey.put
-        ({ keyNameUri: keyName.toUri(), keyType: keyType,
-           keyDer: new Blob(publicKeyDer, true).buf(),
-           defaultCertificate: null });
-    });
-  });
-};
-
-/**
- * Get the public key DER blob from the identity storage.
- * @param {Name} keyName The name of the requested public key.
- * @param {boolean} useSync (optional) If true then return a rejected promise
- * since this only supports async code.
- * @return {Promise} A promise which returns the DER Blob, or a promise rejected
- * with SecurityException if the key doesn't exist.
- */
-IndexedDbIdentityStorage.prototype.getKeyPromise = function(keyName, useSync)
-{
-  if (useSync)
-    return Promise.reject(new SecurityException(new Error
-      ("IndexedDbIdentityStorage.getKeyPromise is only supported for async")));
-
-  if (keyName.size() === 0)
-    return Promise.reject(new SecurityException(new Error
-      ("IndexedDbIdentityStorage.getKeyPromise: Empty keyName")));
-
-  return this.database.publicKey.get(keyName.toUri())
-  .then(function(publicKeyEntry) {
-    if (publicKeyEntry)
-      return Promise.resolve(new Blob(publicKeyEntry.keyDer));
-    else
-      return Promise.reject(new SecurityException(new Error
-        ("IndexedDbIdentityStorage.getKeyPromise: The key does not exist")));
-  });
-};
-
-/**
- * Check if the specified certificate already exists.
- * @param {Name} certificateName The name of the certificate.
- * @param {boolean} useSync (optional) If true then return a rejected promise
- * since this only supports async code.
- * @return {Promise} A promise which returns true if the certificate exists.
- */
-IndexedDbIdentityStorage.prototype.doesCertificateExistPromise = function
-  (certificateName, useSync)
-{
-  if (useSync)
-    return Promise.reject(new SecurityException(new Error
-      ("IndexedDbIdentityStorage.doesCertificateExistPromise is only supported for async")));
-
-  return this.database.certificate.where("certificateNameUri").equals
-    (certificateName.toUri())
-  .count()
-  .then(function(count) {
-    return Promise.resolve(count > 0);
-  });
-};
-
-/**
- * Add a certificate to the identity storage. Also call addKey to ensure that
- * the certificate key exists. If the certificate is already installed, don't
- * replace it.
- * @param {IdentityCertificate} certificate The certificate to be added.  This
- * makes a copy of the certificate.
- * @param {boolean} useSync (optional) If true then return a rejected promise
- * since this only supports async code.
- * @return {Promise} A promise which fulfills when finished.
- */
-IndexedDbIdentityStorage.prototype.addCertificatePromise = function
-  (certificate, useSync)
-{
-  if (useSync)
-    return Promise.reject(new SecurityException(new Error
-      ("IndexedDbIdentityStorage.addCertificatePromise is only supported for async")));
-
-  var certificateName = certificate.getName();
-  var keyName = certificate.getPublicKeyName();
-
-  var thisStorage = this;
-  return this.addKeyPromise
-    (keyName, certificate.getPublicKeyInfo().getKeyType(),
-     certificate.getPublicKeyInfo().getKeyDer(), useSync)
-  .then(function() {
-    return thisStorage.doesCertificateExistPromise(certificateName);
-  })
-  .then(function(exists) {
-    if (exists)
-      return Promise.resolve();
-
-    // Insert the certificate.
-    // wireEncode returns the cached encoding if available.
-    return thisStorage.database.certificate.put
-      ({ certificateNameUri: certificateName.toUri(),
-         encoding: certificate.wireEncode().buf() });
-  });
-};
-
-/**
- * Get a certificate from the identity storage.
- * @param {Name} certificateName The name of the requested certificate.
- * @param {boolean} useSync (optional) If true then return a rejected promise
- * since this only supports async code.
- * @return {Promise} A promise which returns the requested
- * IdentityCertificate, or a promise rejected with SecurityException if the
- * certificate doesn't exist.
- */
-IndexedDbIdentityStorage.prototype.getCertificatePromise = function
-  (certificateName, useSync)
-{
-  if (useSync)
-    return Promise.reject(new SecurityException(new Error
-      ("IndexedDbIdentityStorage.getCertificatePromise is only supported for async")));
-
-  return this.database.certificate.get(certificateName.toUri())
-  .then(function(certificateEntry) {
-    if (certificateEntry) {
-      var certificate = new IdentityCertificate();
-      try {
-        certificate.wireDecode(certificateEntry.encoding);
-      } catch (ex) {
-        return Promise.reject(new SecurityException(new Error
-          ("IndexedDbIdentityStorage.getCertificatePromise: The certificate cannot be decoded")));
-      }
-      return Promise.resolve(certificate);
-    }
-    else
-      return Promise.reject(new SecurityException(new Error
-        ("IndexedDbIdentityStorage.getCertificatePromise: The certificate does not exist")));
-  });
-};
-
-/*****************************************
- *           Get/Set Default             *
- *****************************************/
-
-/**
- * Get the default identity.
- * @param {boolean} useSync (optional) If true then return a rejected promise
- * since this only supports async code.
- * @return {Promise} A promise which returns the Name of default identity,
- * or a promise rejected with SecurityException if the default identity is not
- * set.
- */
-IndexedDbIdentityStorage.prototype.getDefaultIdentityPromise = function(useSync)
-{
-  return this.database.globals.get("defaultIdentityUri")
-  .then(function(defaultIdentityEntry) {
-    if (defaultIdentityEntry)
-      return Promise.resolve(new Name(defaultIdentityEntry.value));
-    else
-      throw new SecurityException(new Error
-        ("IndexedDbIdentityStorage.getDefaultIdentity: The default identity is not defined"));
-  });
-};
-
-/**
- * Get the default key name for the specified identity.
- * @param {Name} identityName The identity name.
- * @param {boolean} useSync (optional) If true then return a rejected promise
- * since this only supports async code.
- * @return {Promise} A promise which returns the default key Name, or a
- * promise rejected with SecurityException if the default key name for the
- * identity is not set.
- */
-IndexedDbIdentityStorage.prototype.getDefaultKeyNameForIdentityPromise = function
-  (identityName, useSync)
-{
-  if (useSync)
-    return Promise.reject(new SecurityException(new Error
-      ("IndexedDbIdentityStorage.getDefaultKeyNameForIdentityPromise is only supported for async")));
-
-  return this.database.identity.get(identityName.toUri())
-  .then(function(identityEntry) {
-    if (identityEntry) {
-      if (identityEntry.defaultKeyUri != null)
-        return Promise.resolve(new Name(identityEntry.defaultKeyUri));
-      else
-        throw new SecurityException(new Error("No default key set."));
-    }
-    else
-      throw new SecurityException(new Error("Identity not found."));
-  });
-};
-
-/**
- * Get the default certificate name for the specified key.
- * @param {Name} keyName The key name.
- * @param {boolean} useSync (optional) If true then return a rejected promise
- * since this only supports async code.
- * @return {Promise} A promise which returns the default certificate Name,
- * or a promise rejected with SecurityException if the default certificate name
- * for the key name is not set.
- */
-IndexedDbIdentityStorage.prototype.getDefaultCertificateNameForKeyPromise = function
-  (keyName, useSync)
-{
-  if (useSync)
-    return Promise.reject(new SecurityException(new Error
-      ("IndexedDbIdentityStorage.getDefaultCertificateNameForKeyPromise is only supported for async")));
-
-  return this.database.publicKey.get(keyName.toUri())
-  .then(function(publicKeyEntry) {
-    if (publicKeyEntry) {
-      if (publicKeyEntry.defaultCertificateUri != null)
-        return Promise.resolve(new Name(publicKeyEntry.defaultCertificateUri));
-      else
-        throw new SecurityException(new Error("No default certificate set."));
-    }
-    else
-      throw new SecurityException(new Error("Key not found."));
-  });
-};
-
-/**
- * Append all the identity names to the nameList.
- * @param {Array<Name>} nameList Append result names to nameList.
- * @param {boolean} isDefault If true, add only the default identity name. If
- * false, add only the non-default identity names.
- * @param {boolean} useSync (optional) If true then return a rejected promise
- * since this only supports async code.
- * @return {Promise} A promise which fulfills when the names are added to
- * nameList.
- */
-IndexedDbIdentityStorage.prototype.getAllIdentitiesPromise = function
-  (nameList, isDefault, useSync)
-{
-  if (useSync)
-    return Promise.reject(new SecurityException(new Error
-      ("IndexedDbIdentityStorage.getAllIdentitiesPromise is only supported for async")));
-
-  var defaultIdentityName = null;
-  var thisStorage = this;
-  return this.getDefaultIdentityPromise()
-  .then(function(localDefaultIdentityName) {
-    defaultIdentityName = localDefaultIdentityName;
-    return SyncPromise.resolve();
-  }, function(err) {
-    // The default identity name was not found.
-    return SyncPromise.resolve();
-  })
-  .then(function() {
-    return thisStorage.database.identity.each(function(identityEntry) {
-      var identityName = new Name(identityEntry.identityNameUri);
-      var identityNameIsDefault =
-        (defaultIdentityName !== null && identityName.equals(defaultIdentityName));
-      if (isDefault && identityNameIsDefault)
-        nameList.push(identityName);
-      else if (!isDefault && !identityNameIsDefault)
-        nameList.push(identityName);
-    });
-  });
-};
-
-/**
- * Append all the key names of a particular identity to the nameList.
- * @param {Name} identityName The identity name to search for.
- * @param {Array<Name>} nameList Append result names to nameList.
- * @param {boolean} isDefault If true, add only the default key name. If false,
- * add only the non-default key names.
- * @param {boolean} useSync (optional) If true then return a rejected promise
- * since this only supports async code.
- * @return {Promise} A promise which fulfills when the names are added to
- * nameList.
- */
-IndexedDbIdentityStorage.prototype.getAllKeyNamesOfIdentityPromise = function
-  (identityName, nameList, isDefault, useSync)
-{
-  if (useSync)
-    return Promise.reject(new SecurityException(new Error
-      ("IndexedDbIdentityStorage.getAllKeyNamesOfIdentityPromise is only supported for async")));
-
-  var defaultKeyName = null;
-  var thisStorage = this;
-  return this.getDefaultKeyNameForIdentityPromise(identityName)
-  .then(function(localDefaultKeyName) {
-    defaultKeyName = localDefaultKeyName;
-    return SyncPromise.resolve();
-  }, function(err) {
-    // The default key name was not found.
-    return SyncPromise.resolve();
-  })
-  .then(function() {
-    // Iterate through each publicKey a to find ones that match identityName.
-    // This is a little inefficient, but we don't expect the in-browser
-    // database to be very big, we don't expect to use this function often (for
-    // deleting an identity), and this is simpler than complicating the database
-    // schema to store the identityName with each publicKey.
-    return thisStorage.database.publicKey.each(function(publicKeyEntry) {
-      var keyName = new Name(publicKeyEntry.keyNameUri);
-      var keyIdentityName = keyName.getPrefix(-1);
-
-      if (keyIdentityName.equals(identityName)) {
-        var keyNameIsDefault =
-          (defaultKeyName !== null && keyName.equals(defaultKeyName));
-        if (isDefault && keyNameIsDefault)
-          nameList.push(keyName);
-        else if (!isDefault && !keyNameIsDefault)
-          nameList.push(keyName);
-      }
-    });
-  });
-};
-
-/**
- * Append all the certificate names of a particular key name to the nameList.
- * @param {Name} keyName The key name to search for.
- * @param {Array<Name>} nameList Append result names to nameList.
- * @param {boolean} isDefault If true, add only the default certificate name.
- * If false, add only the non-default certificate names.
- * @param {boolean} useSync (optional) If true then return a rejected promise
- * since this only supports async code.
- * @return {Promise} A promise which fulfills when the names are added to
- * nameList.
- */
-IndexedDbIdentityStorage.prototype.getAllCertificateNamesOfKeyPromise = function
-  (keyName, nameList, isDefault, useSync)
-{
-  if (useSync)
-    return Promise.reject(new SecurityException(new Error
-      ("IndexedDbIdentityStorage.getAllCertificateNamesOfKeyPromise is only supported for async")));
-
-  var defaultCertificateName = null;
-  var thisStorage = this;
-  return this.getDefaultCertificateNameForKeyPromise(keyName)
-  .then(function(localDefaultCertificateName) {
-    defaultCertificateName = localDefaultCertificateName;
-    return SyncPromise.resolve();
-  }, function(err) {
-    // The default certificate name was not found.
-    return SyncPromise.resolve();
-  })
-  .then(function() {
-    // Iterate through each certificate record a to find ones that match keyName.
-    // This is a little inefficient, but we don't expect the in-browser
-    // database to be very big, we don't expect to use this function often (for
-    // deleting an identity), and this is simpler than complicating the database
-    // schema to store the keyName with each certificate record.
-    return thisStorage.database.certificate.each(function(certificateEntry) {
-      var certificateName = new Name(certificateEntry.certificateNameUri);
-      var certificateKeyName = IdentityCertificate.certificateNameToPublicKeyName
-        (certificateName);
-
-      if (certificateKeyName.equals(keyName)) {
-        var certificateNameIsDefault =
-          (defaultCertificateName !== null &&
-           certificateName.equals(defaultCertificateName));
-        if (isDefault && certificateNameIsDefault)
-          nameList.push(certificateName);
-        else if (!isDefault && !certificateNameIsDefault)
-          nameList.push(certificateName);
-      }
-    });
-  });
-};
-
-/**
- * Set the default identity.  If the identityName does not exist, then clear the
- * default identity so that getDefaultIdentity() throws an exception.
- * @param {Name} identityName The default identity name.
- * @param {boolean} useSync (optional) If true then return a rejected promise
- * since this only supports async code.
- * @return {Promise} A promise which fulfills when the default identity is set.
- */
-IndexedDbIdentityStorage.prototype.setDefaultIdentityPromise = function
-  (identityName, useSync)
-{
-  if (useSync)
-    return Promise.reject(new SecurityException(new Error
-      ("IndexedDbIdentityStorage.setDefaultIdentityPromise is only supported for async")));
-
-  var thisStorage = this;
-  return this.doesIdentityExistPromise(identityName)
-  .then(function(exists) {
-    if (exists)
-      return thisStorage.database.globals.put
-        ({ key: "defaultIdentityUri", value: identityName.toUri() });
-    else
-      // The identity doesn't exist, so clear the default.
-      return thisStorage.database.globals.delete("defaultIdentityUri");
-  });
-};
-
-/**
- * Set a key as the default key of an identity. The identity name is inferred
- * from keyName.
- * @param {Name} keyName The name of the key.
- * @param {Name} identityNameCheck (optional) The identity name to check that the
- * keyName contains the same identity name. If an empty name, it is ignored.
- * @param {boolean} useSync (optional) If true then return a rejected promise
- * since this only supports async code.
- * @return {Promise} A promise which fulfills when the default key name is
- * set.
- */
-IndexedDbIdentityStorage.prototype.setDefaultKeyNameForIdentityPromise = function
-  (keyName, identityNameCheck, useSync)
-{
-  useSync = (typeof identityNameCheck === "boolean") ? identityNameCheck : useSync;
-  identityNameCheck = (identityNameCheck instanceof Name) ? identityNameCheck : null;
-
-  if (useSync)
-    return Promise.reject(new SecurityException(new Error
-      ("IndexedDbIdentityStorage.setDefaultKeyNameForIdentityPromise is only supported for async")));
-
-  var identityName = keyName.getPrefix(-1);
-
-  if (identityNameCheck != null && identityNameCheck.size() > 0 &&
-      !identityNameCheck.equals(identityName))
-    return Promise.reject(new SecurityException(new Error
-      ("The specified identity name does not match the key name")));
-
-  // update does nothing if the identityName doesn't exist.
-  return this.database.identity.update
-    (identityName.toUri(), { defaultKeyUri: keyName.toUri() });
-};
-
-/**
- * Set the default key name for the specified identity.
- * @param {Name} keyName The key name.
- * @param {Name} certificateName The certificate name.
- * @param {boolean} useSync (optional) If true then return a rejected promise
- * since this only supports async code.
- * @return {Promise} A promise which fulfills when the default certificate
- * name is set.
- */
-IndexedDbIdentityStorage.prototype.setDefaultCertificateNameForKeyPromise = function
-  (keyName, certificateName, useSync)
-{
-  if (useSync)
-    return Promise.reject(new SecurityException(new Error
-      ("IndexedDbIdentityStorage.setDefaultCertificateNameForKeyPromise is only supported for async")));
-
-  // update does nothing if the keyName doesn't exist.
-  return this.database.publicKey.update
-    (keyName.toUri(), { defaultCertificateUri: certificateName.toUri() });
-};
-
-/*****************************************
- *            Delete Methods             *
- *****************************************/
-
-/**
- * Delete a certificate.
- * @param {Name} certificateName The certificate name.
- * @param {boolean} useSync (optional) If true then return a rejected promise
- * since this only supports async code.
- * @return {Promise} A promise which fulfills when the certificate info is
- * deleted.
- */
-IndexedDbIdentityStorage.prototype.deleteCertificateInfoPromise = function
-  (certificateName, useSync)
-{
-  if (useSync)
-    return Promise.reject(new SecurityException(new Error
-      ("IndexedDbIdentityStorage.deleteCertificateInfoPromise is only supported for async")));
-
-  if (certificateName.size() === 0)
-    return Promise.resolve();
-
-  return this.database.certificate.delete(certificateName.toUri());
-};
-
-/**
- * Delete a public key and related certificates.
- * @param {Name} keyName The key name.
- * @param {boolean} useSync (optional) If true then return a rejected promise
- * since this only supports async code.
- * @return {Promise} A promise which fulfills when the public key info is
- * deleted.
- */
-IndexedDbIdentityStorage.prototype.deletePublicKeyInfoPromise = function
-  (keyName, useSync)
-{
-  if (useSync)
-    return Promise.reject(new SecurityException(new Error
-      ("IndexedDbIdentityStorage.deletePublicKeyInfoPromise is only supported for async")));
-
-  if (keyName.size() === 0)
-    return Promise.resolve();
-
-  var thisStorage = this;
-  return this.database.publicKey.delete(keyName.toUri())
-  .then(function() {
-    // Iterate through each certificate to find ones that match keyName. This is
-    // a little inefficient, but we don't expect the in-browswer database to be
-    // very big, we don't expect to delete often, and this is simpler than
-    // complicating the database schema to store the keyName with each certificate.
-    return thisStorage.database.certificate.each(function(certificateEntry) {
-      if (IdentityCertificate.certificateNameToPublicKeyName
-          (new Name(certificateEntry.certificateNameUri)).equals(keyName))
-        thisStorage.database.certificate.delete
-          (certificateEntry.certificateNameUri);
-    });
-  });
-};
-
-/**
- * Delete an identity and related public keys and certificates.
- * @param {Name} identityName The identity name.
- * @param {boolean} useSync (optional) If true then return a rejected promise
- * since this only supports async code.
- * @return {Promise} A promise which fulfills when the identity info is
- * deleted.
- */
-IndexedDbIdentityStorage.prototype.deleteIdentityInfoPromise = function
-  (identityName, useSync)
-{
-  if (useSync)
-    return Promise.reject(new SecurityException(new Error
-      ("IndexedDbIdentityStorage.deleteIdentityInfoPromise is only supported for async")));
-
-  var thisStorage = this;
-  return this.database.identity.delete(identityName.toUri())
-  // Iterate through each publicKey and certificate to find ones that match
-  // identityName. This is a little inefficient, but we don't expect the
-  // in-browswer database to be very big, we don't expect to delete often, and
-  // this is simpler than complicating the database schema to store the
-  // identityName with each publicKey and certificate.
-  .then(function() {
-    return thisStorage.database.publicKey.each(function(publicKeyEntry) {
-      var keyIdentityName = new Name(publicKeyEntry.keyNameUri).getPrefix(-1);
-      if (keyIdentityName.equals(identityName))
-        thisStorage.database.publicKey.delete(publicKeyEntry.keyNameUri);
-    });
-  })
-  .then(function() {
-    return thisStorage.database.certificate.each(function(certificateEntry) {
-      var certificateKeyName = IdentityCertificate.certificateNameToPublicKeyName
-        (new Name(certificateEntry.certificateNameUri));
-      var certificateIdentityName = certificateKeyName.getPrefix(-1);
-      if (certificateIdentityName.equals(identityName))
-        thisStorage.database.certificate.delete
-          (certificateEntry.certificateNameUri);
-    });
-  });
-};
-/**
- * Copyright (C) 2014-2019 Regents of the University of California.
- * @author: Jeff Thompson <jefft0@remap.ucla.edu>
- * From ndn-cxx security by Yingdi Yu <yingdi@cs.ucla.edu>.
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU Lesser General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU Lesser General Public License for more details.
- *
- * You should have received a copy of the GNU Lesser General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
- * A copy of the GNU Lesser General Public License is in the file COPYING.
- */
-
-/** @ignore */
-var Name = require('../../name.js').Name; /** @ignore */
-var Blob = require('../../util/blob.js').Blob; /** @ignore */
-var SecurityException = require('../security-exception.js').SecurityException; /** @ignore */
-var IdentityCertificate = require('../certificate/identity-certificate.js').IdentityCertificate; /** @ignore */
-var SyncPromise = require('../../util/sync-promise.js').SyncPromise; /** @ignore */
-var IdentityStorage = require('./identity-storage.js').IdentityStorage;
-
-/**
- * MemoryIdentityStorage extends IdentityStorage and implements its methods to
- * store identity, public key and certificate objects in memory. The application
- * must get the objects through its own means and add the objects to the
- * MemoryIdentityStorage object. To use permanent file-based storage, see
- * BasicIdentityStorage.
- * @constructor
- */
-var MemoryIdentityStorage = function MemoryIdentityStorage()
-{
-  // Call the base constructor.
-  IdentityStorage.call(this);
-
-  // The map key is the identityName.toUri(). The value is the object
-  //   {defaultKey // Name
-  //   }.
-  this.identityStore = {};
-  // The default identity in identityStore, or "" if not defined.
-  this.defaultIdentity = "";
-  // The key is the keyName.toUri(). The value is the object
-  //  {keyType, // number from KeyType
-  //   keyDer   // Blob
-  //   defaultCertificate // Name
-  //  }.
-  this.keyStore = {};
-  // The key is the key is the certificateName.toUri(). The value is the
-  //   encoded certificate.
-  this.certificateStore = {};
-};
-
-MemoryIdentityStorage.prototype = new IdentityStorage();
-MemoryIdentityStorage.prototype.name = "MemoryIdentityStorage";
-
-exports.MemoryIdentityStorage = MemoryIdentityStorage;
-/**
- * Check if the specified identity already exists.
- * @param {Name} identityName The identity name.
- * @return {SyncPromise} A promise which returns true if the identity exists.
- */
-MemoryIdentityStorage.prototype.doesIdentityExistPromise = function(identityName)
-{
-  return SyncPromise.resolve
-    (this.identityStore[identityName.toUri()] !== undefined);
-};
-
-/**
- * Add a new identity. Do nothing if the identity already exists.
- * @param {Name} identityName The identity name to be added.
- * @return {SyncPromise} A promise which fulfills when the identity is added.
- */
-MemoryIdentityStorage.prototype.addIdentityPromise = function(identityName)
-{
-  var identityUri = identityName.toUri();
-  if (this.identityStore[identityUri] === undefined)
-    this.identityStore[identityUri] = { defaultKey: null };
-
-  return SyncPromise.resolve();
-};
-
-/**
- * Check if the specified key already exists.
- * @param {Name} keyName The name of the key.
- * @return {SyncPromise} A promise which returns true if the key exists.
- */
-MemoryIdentityStorage.prototype.doesKeyExistPromise = function(keyName)
-{
-  return SyncPromise.resolve(this.keyStore[keyName.toUri()] !== undefined);
-};
-
-/**
- * Add a public key to the identity storage. Also call addIdentity to ensure
- * that the identityName for the key exists. However, if the key already
- * exists, do nothing.
- * @param {Name} keyName The name of the public key to be added.
- * @param {number} keyType Type of the public key to be added from KeyType, such
- * as KeyType.RSA..
- * @param {Blob} publicKeyDer A blob of the public key DER to be added.
- * @return {SyncPromise} A promise which fulfills when complete.
- */
-MemoryIdentityStorage.prototype.addKeyPromise = function
-  (keyName, keyType, publicKeyDer)
-{
-  if (keyName.size() === 0)
-    return SyncPromise.resolve();
-
-  if (this.doesKeyExist(keyName))
-    return SyncPromise.resolve();
-
-  var identityName = keyName.getSubName(0, keyName.size() - 1);
-
-  this.addIdentity(identityName);
-
-  this.keyStore[keyName.toUri()] =
-    { keyType: keyType, keyDer: new Blob(publicKeyDer), defaultCertificate: null };
-
-  return SyncPromise.resolve();
-};
-
-/**
- * Get the public key DER blob from the identity storage.
- * @param {Name} keyName The name of the requested public key.
- * @return {SyncPromise} A promise which returns the DER Blob, or a promise
- * rejected with SecurityException if the key doesn't exist.
- */
-MemoryIdentityStorage.prototype.getKeyPromise = function(keyName)
-{
-  if (keyName.size() === 0)
-    return SyncPromise.reject(new SecurityException(new Error
-      ("MemoryIdentityStorage.getKeyPromise: Empty keyName")));
-
-  var keyNameUri = keyName.toUri();
-  var entry = this.keyStore[keyNameUri];
-  if (entry === undefined)
-    return SyncPromise.reject(new SecurityException(new Error
-      ("MemoryIdentityStorage.getKeyPromise: The key does not exist")));
-
-  return SyncPromise.resolve(entry.keyDer);
-};
-
-/**
- * Check if the specified certificate already exists.
- * @param {Name} certificateName The name of the certificate.
- * @return {SyncPromise} A promise which returns true if the certificate exists.
- */
-MemoryIdentityStorage.prototype.doesCertificateExistPromise = function
-  (certificateName)
-{
-  return SyncPromise.resolve
-    (this.certificateStore[certificateName.toUri()] !== undefined);
-};
-
-/**
- * Add a certificate to the identity storage. Also call addKey to ensure that
- * the certificate key exists. If the certificate is already installed, don't
- * replace it.
- * @param {IdentityCertificate} certificate The certificate to be added.  This
- * makes a copy of the certificate.
- * @return {SyncPromise} A promise which fulfills when finished.
- */
-MemoryIdentityStorage.prototype.addCertificatePromise = function(certificate)
-{
-  var certificateName = certificate.getName();
-  var keyName = certificate.getPublicKeyName();
-
-  this.addKey(keyName, certificate.getPublicKeyInfo().getKeyType(),
-         certificate.getPublicKeyInfo().getKeyDer());
-
-  if (this.doesCertificateExist(certificateName))
-    return SyncPromise.resolve();
-
-  // Insert the certificate.
-  // wireEncode returns the cached encoding if available.
-  this.certificateStore[certificateName.toUri()] = certificate.wireEncode();
-
-  return SyncPromise.resolve();
-};
-
-/**
- * Get a certificate from the identity storage.
- * @param {Name} certificateName The name of the requested certificate.
- * @return {SyncPromise} A promise which returns the requested
- * IdentityCertificate, or a promise rejected with SecurityException if the
- * certificate doesn't exist.
- */
-MemoryIdentityStorage.prototype.getCertificatePromise = function
-  (certificateName)
-{
-  var certificateNameUri = certificateName.toUri();
-  if (this.certificateStore[certificateNameUri] === undefined)
-    return SyncPromise.reject(new SecurityException(new Error
-      ("MemoryIdentityStorage.getCertificatePromise: The certificate does not exist")));
-
-  var certificate = new IdentityCertificate();
-  try {
-    certificate.wireDecode(this.certificateStore[certificateNameUri]);
-  } catch (ex) {
-    return SyncPromise.reject(new SecurityException(new Error
-      ("MemoryIdentityStorage.getCertificatePromise: The certificate cannot be decoded")));
-  }
-  return SyncPromise.resolve(certificate);
-};
-
-/**
- * Get the TPM locator associated with this storage.
- * @param {boolean} useSync (optional) If true then return a rejected promise
- * since this only supports async code.
- * @return {Promise|SyncPromise} A promise which returns the TPM locator, or a
- * promise rejected with SecurityException if the TPM locator doesn't exist.
- */
-IdentityStorage.prototype.getTpmLocatorPromise = function(useSync)
-{
-  return SyncPromise.resolve("tpm-memory:");
-};
-
-/*****************************************
- *           Get/Set Default             *
- *****************************************/
-
-/**
- * Get the default identity.
- * @return {SyncPromise} A promise which returns the Name of default identity,
- * or a promise rejected with SecurityException if the default identity is not
- * set.
- */
-MemoryIdentityStorage.prototype.getDefaultIdentityPromise = function()
-{
-  if (this.defaultIdentity.length === 0)
-    return SyncPromise.reject(new SecurityException(new Error
-      ("MemoryIdentityStorage.getDefaultIdentity: The default identity is not defined")));
-
-  return SyncPromise.resolve(new Name(this.defaultIdentity));
-};
-
-/**
- * Get the default key name for the specified identity.
- * @param {Name} identityName The identity name.
- * @return {SyncPromise} A promise which returns the default key Name, or a
- * promise rejected with SecurityException if the default key name for the
- * identity is not set.
- */
-MemoryIdentityStorage.prototype.getDefaultKeyNameForIdentityPromise = function
-  (identityName)
-{
-  var identityUri = identityName.toUri();
-  if (this.identityStore[identityUri] !== undefined) {
-    if (this.identityStore[identityUri].defaultKey != null)
-      return SyncPromise.resolve(this.identityStore[identityUri].defaultKey);
-    else
-      return SyncPromise.reject(new SecurityException(new Error
-        ("No default key set.")));
-  }
-  else
-    return SyncPromise.reject(new SecurityException(new Error("Identity not found.")));
-};
-
-/**
- * Get the default certificate name for the specified key.
- * @param {Name} keyName The key name.
- * @return {SyncPromise} A promise which returns the default certificate Name,
- * or a promise rejected with SecurityException if the default certificate name
- * for the key name is not set.
- */
-MemoryIdentityStorage.prototype.getDefaultCertificateNameForKeyPromise = function
-  (keyName)
-{
-  var keyUri = keyName.toUri();
-  if (this.keyStore[keyUri] !== undefined) {
-    if (this.keyStore[keyUri].defaultCertificate != null)
-      return SyncPromise.resolve(this.keyStore[keyUri].defaultCertificate);
-    else
-      return SyncPromise.reject(new SecurityException(new Error
-        ("No default certificate set.")));
-  }
-  else
-    return SyncPromise.reject(new SecurityException(new Error("Key not found.")));
-};
-
-/**
- * Set the default identity.  If the identityName does not exist, then clear the
- * default identity so that getDefaultIdentity() throws an exception.
- * @param {Name} identityName The default identity name.
- * @return {SyncPromise} A promise which fulfills when the default identity is set.
- */
-MemoryIdentityStorage.prototype.setDefaultIdentityPromise = function
-  (identityName)
-{
-  var identityUri = identityName.toUri();
-  if (this.identityStore[identityUri] !== undefined)
-    this.defaultIdentity = identityUri;
-  else
-    // The identity doesn't exist, so clear the default.
-    this.defaultIdentity = "";
-
-  return SyncPromise.resolve();
-};
-
-/**
- * Set a key as the default key of an identity. The identity name is inferred
- * from keyName.
- * @param {Name} keyName The name of the key.
- * @param {Name} identityNameCheck (optional) The identity name to check that the
- * keyName contains the same identity name. If an empty name, it is ignored.
- * @return {SyncPromise} A promise which fulfills when the default key name is
- * set.
- */
-MemoryIdentityStorage.prototype.setDefaultKeyNameForIdentityPromise = function
-  (keyName, identityNameCheck)
-{
-  identityNameCheck = (identityNameCheck instanceof Name) ? identityNameCheck : null;
-
-  var identityName = keyName.getPrefix(-1);
-
-  if (identityNameCheck != null && identityNameCheck.size() > 0 &&
-      !identityNameCheck.equals(identityName))
-    return SyncPromise.reject(new SecurityException(new Error
-      ("The specified identity name does not match the key name")));
-
-  var identityUri = identityName.toUri();
-  if (this.identityStore[identityUri] !== undefined)
-    this.identityStore[identityUri].defaultKey = new Name(keyName);
-
-  return SyncPromise.resolve();
-};
-
-/**
- * Set the default key name for the specified identity.
- * @param {Name} keyName The key name.
- * @param {Name} certificateName The certificate name.
- * @return {SyncPromise} A promise which fulfills when the default certificate
- * name is set.
- */
-MemoryIdentityStorage.prototype.setDefaultCertificateNameForKeyPromise = function
-  (keyName, certificateName)
-{
-  var keyUri = keyName.toUri();
-  if (this.keyStore[keyUri] !== undefined)
-    this.keyStore[keyUri].defaultCertificate = new Name(certificateName);
-
-  return SyncPromise.resolve();
-};
-
-/*****************************************
- *            Delete Methods             *
- *****************************************/
-
-/**
- * Delete a certificate.
- * @param {Name} certificateName The certificate name.
- * @return {SyncPromise} A promise which fulfills when the certificate
- * info is deleted.
- */
-MemoryIdentityStorage.prototype.deleteCertificateInfoPromise = function
-  (certificateName)
-{
-  return SyncPromise.reject(new Error
-    ("MemoryIdentityStorage.deleteCertificateInfoPromise is not implemented"));
-};
-
-/**
- * Delete a public key and related certificates.
- * @param {Name} keyName The key name.
- * @return {SyncPromise} A promise which fulfills when the public key info is
- * deleted.
- */
-MemoryIdentityStorage.prototype.deletePublicKeyInfoPromise = function(keyName)
-{
-  return SyncPromise.reject(new Error
-    ("MemoryIdentityStorage.deletePublicKeyInfoPromise is not implemented"));
-};
-
-/**
- * Delete an identity and related public keys and certificates.
- * @param {Name} identity The identity name.
- * @return {SyncPromise} A promise which fulfills when the identity info is
- * deleted.
- */
-MemoryIdentityStorage.prototype.deleteIdentityInfoPromise = function(identity)
-{
-  return SyncPromise.reject(new Error
-    ("MemoryIdentityStorage.deleteIdentityInfoPromise is not implemented"));
-};
-/**
- * Copyright (C) 2014-2019 Regents of the University of California.
- * @author: Jeff Thompson <jefft0@remap.ucla.edu>
- * From ndn-cxx security by Yingdi Yu <yingdi@cs.ucla.edu>.
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU Lesser General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU Lesser General Public License for more details.
- *
- * You should have received a copy of the GNU Lesser General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
- * A copy of the GNU Lesser General Public License is in the file COPYING.
- */
-
-/** @ignore */
-var SyncPromise = require('../../util/sync-promise.js').SyncPromise; /** @ignore */
-var DerNode = require('../../encoding/der/der-node.js').DerNode;
-
-/**
- * PrivateKeyStorage is an abstract class which declares methods for working
- * with a private key storage. You should use a subclass.
- * @constructor
- */
-var PrivateKeyStorage = function PrivateKeyStorage()
-{
-};
-
-exports.PrivateKeyStorage = PrivateKeyStorage;
-
-/**
- * Generate a pair of asymmetric keys.
- * @param {Name} keyName The name of the key pair.
- * @param {KeyParams} params The parameters of the key.
- * @param {boolean} (optional) useSync If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise that fulfills when the pair is
- * generated.
- */
-PrivateKeyStorage.prototype.generateKeyPairPromise = function
-  (keyName, params, useSync)
-{
-  return SyncPromise.reject(new Error
-    ("PrivateKeyStorage.generateKeyPairPromise is not implemented"));
-};
-
-/**
- * Generate a pair of asymmetric keys.
- * @param {Name} keyName The name of the key pair.
- * @param {KeyParams} params The parameters of the key.
- * @throws Error If generateKeyPairPromise doesn't return a SyncPromise which
- * is already fulfilled.
- */
-PrivateKeyStorage.prototype.generateKeyPair = function(keyName, params)
-{
-  SyncPromise.getValue(this.generateKeyPairPromise(keyName, params, true));
-};
-
-/**
- * Delete a pair of asymmetric keys. If the key doesn't exist, do nothing.
- * @param {Name} keyName The name of the key pair.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise that fulfills when the key pair is
- * deleted.
- */
-PrivateKeyStorage.prototype.deleteKeyPairPromise = function(keyName, useSync)
-{
-  return SyncPromise.reject(new Error
-    ("PrivateKeyStorage.deleteKeyPairPromise is not implemented"));
-};
-
-/**
- * Delete a pair of asymmetric keys. If the key doesn't exist, do nothing.
- * @param {Name} keyName The name of the key pair.
- * @throws Error If deleteKeyPairPromise doesn't return a SyncPromise which
- * is already fulfilled.
- */
-PrivateKeyStorage.prototype.deleteKeyPair = function(keyName)
-{
-  SyncPromise.getValue(this.deleteKeyPairPromise(keyName, true));
-};
-
-/**
- * Get the public key
- * @param {Name} keyName The name of public key.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise that returns the PublicKey.
- */
-PrivateKeyStorage.prototype.getPublicKeyPromise = function(keyName, useSync)
-{
-  return SyncPromise.reject(new Error
-    ("PrivateKeyStorage.getPublicKeyPromise is not implemented"));
-};
-
-/**
- * Get the public key
- * @param {Name} keyName The name of public key.
- * @return {PublicKey} The public key.
- * @throws Error If getPublicKeyPromise doesn't return a SyncPromise which
- * is already fulfilled.
- */
-PrivateKeyStorage.prototype.getPublicKey = function(keyName)
-{
-  return SyncPromise.getValue(this.getPublicKeyPromise(keyName, true));
-};
-
-/**
- * Fetch the private key for keyName and sign the data to produce a signature Blob.
- * @param {Buffer} data Pointer to the input byte array.
- * @param {Name} keyName The name of the signing key.
- * @param {number} digestAlgorithm (optional) The digest algorithm from
- * DigestAlgorithm, such as DigestAlgorithm.SHA256. If omitted, use
- * DigestAlgorithm.SHA256.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise that returns the signature Blob.
- */
-PrivateKeyStorage.prototype.signPromise = function
-  (data, keyName, digestAlgorithm, useSync)
-{
-  return SyncPromise.reject(new Error("PrivateKeyStorage.sign is not implemented"));
-};
-
-/**
- * Fetch the private key for keyName and sign the data to produce a signature Blob.
- * @param {Buffer} data Pointer to the input byte array.
- * @param {Name} keyName The name of the signing key.
- * @param {number} digestAlgorithm (optional) The digest algorithm from
- * DigestAlgorithm, such as DigestAlgorithm.SHA256. If omitted, use
- * DigestAlgorithm.SHA256.
- * @return {Blob} The signature Blob.
- * @throws Error If signPromise doesn't return a SyncPromise which is already
- * fulfilled.
- */
-PrivateKeyStorage.prototype.sign = function(data, keyName, digestAlgorithm)
-{
-  return SyncPromise.getValue
-    (this.signPromise(data, keyName, digestAlgorithm, true));
-};
-
-/**
- * Decrypt data.
- * @param {Name} keyName The name of the decrypting key.
- * @param {Buffer} data The byte to be decrypted.
- * @param {boolean} isSymmetric (optional) If true symmetric encryption is used,
- * otherwise asymmetric encryption is used. If omitted, use asymmetric
- * encryption.
- * @return {Blob} The decrypted data.
- */
-PrivateKeyStorage.prototype.decrypt = function(keyName, data, isSymmetric)
-{
-  throw new Error("PrivateKeyStorage.decrypt is not implemented");
-};
-
-/**
- * Encrypt data.
- * @param {Name} keyName The name of the encrypting key.
- * @param {Buffer} data The byte to be encrypted.
- * @param {boolean} isSymmetric (optional) If true symmetric encryption is used,
- * otherwise asymmetric encryption is used. If omitted, use asymmetric
- * encryption.
- * @return {Blob} The encrypted data.
- */
-PrivateKeyStorage.prototype.encrypt = function(keyName, data, isSymmetric)
-{
-  throw new Error("PrivateKeyStorage.encrypt is not implemented");
-};
-
-/**
- * Generate a symmetric key.
- * @param {Name} keyName The name of the key.
- * @param {KeyParams} params The parameters of the key.
- */
-PrivateKeyStorage.prototype.generateKey = function(keyName, params)
-{
-  throw new Error("PrivateKeyStorage.generateKey is not implemented");
-};
-
-/**
- * Check if a particular key exists.
- * @param {Name} keyName The name of the key.
- * @param {number} keyClass The class of the key, e.g. KeyClass.PUBLIC,
- * KeyClass.PRIVATE, or KeyClass.SYMMETRIC.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise which returns true if the key exists.
- */
-PrivateKeyStorage.prototype.doesKeyExistPromise = function
-  (keyName, keyClass, useSync)
-{
-  return SyncPromise.reject(new Error
-    ("PrivateKeyStorage.doesKeyExist is not implemented"));
-};
-
-/**
- * Check if a particular key exists.
- * @param {Name} keyName The name of the key.
- * @param {number} keyClass The class of the key, e.g. KeyClass.PUBLIC,
- * KeyClass.PRIVATE, or KeyClass.SYMMETRIC.
- * @return {boolean} True if the key exists.
- * @throws Error If doesKeyExistPromise doesn't return a SyncPromise which
- * is already fulfilled.
- */
-PrivateKeyStorage.prototype.doesKeyExist = function(keyName, keyClass)
-{
-  return SyncPromise.getValue(this.doesKeyExistPromise(keyName, keyClass, true));
-};
-
-/**
- * Encode the private key to a PKCS #8 private key. We do this explicitly here
- * to avoid linking to extra OpenSSL libraries.
- * @param {Buffer} privateKeyDer The input private key DER.
- * @param {OID} oid The OID of the privateKey.
- * @param {DerNode} parameters The DerNode of the parameters for the OID.
- * @return {Blob} The PKCS #8 private key DER.
- */
-PrivateKeyStorage.encodePkcs8PrivateKey = function
-  (privateKeyDer, oid, parameters)
-{
-  var algorithmIdentifier = new DerNode.DerSequence();
-  algorithmIdentifier.addChild(new DerNode.DerOid(oid));
-  algorithmIdentifier.addChild(parameters);
-
-  var result = new DerNode.DerSequence();
-  result.addChild(new DerNode.DerInteger(0));
-  result.addChild(algorithmIdentifier);
-  result.addChild(new DerNode.DerOctetString(privateKeyDer));
-
-  return result.encode();
-};
-
-/**
- * Encode the RSAKey private key as a PKCS #1 private key.
- * @param {RSAKey} rsaKey The RSAKey private key.
- * @return {Blob} The PKCS #1 private key DER.
- */
-PrivateKeyStorage.encodePkcs1PrivateKeyFromRSAKey = function(rsaKey)
-{
-  // Imitate KJUR getEncryptedPKCS5PEMFromRSAKey.
-  var result = new DerNode.DerSequence();
-
-  result.addChild(new DerNode.DerInteger(0));
-  result.addChild(new DerNode.DerInteger(PrivateKeyStorage.bigIntegerToBuffer(rsaKey.n)));
-  result.addChild(new DerNode.DerInteger(rsaKey.e));
-  result.addChild(new DerNode.DerInteger(PrivateKeyStorage.bigIntegerToBuffer(rsaKey.d)));
-  result.addChild(new DerNode.DerInteger(PrivateKeyStorage.bigIntegerToBuffer(rsaKey.p)));
-  result.addChild(new DerNode.DerInteger(PrivateKeyStorage.bigIntegerToBuffer(rsaKey.q)));
-  result.addChild(new DerNode.DerInteger(PrivateKeyStorage.bigIntegerToBuffer(rsaKey.dmp1)));
-  result.addChild(new DerNode.DerInteger(PrivateKeyStorage.bigIntegerToBuffer(rsaKey.dmq1)));
-  result.addChild(new DerNode.DerInteger(PrivateKeyStorage.bigIntegerToBuffer(rsaKey.coeff)));
-
-  return result.encode();
-};
-
-/**
- * Encode the public key values in the RSAKey private key as a
- * SubjectPublicKeyInfo.
- * @param {RSAKey} rsaKey The RSAKey private key with the public key values.
- * @return {Blob} The SubjectPublicKeyInfo DER.
- */
-PrivateKeyStorage.encodePublicKeyFromRSAKey = function(rsaKey)
-{
-  var rsaPublicKey = new DerNode.DerSequence();
-
-  rsaPublicKey.addChild(new DerNode.DerInteger(PrivateKeyStorage.bigIntegerToBuffer(rsaKey.n)));
-  rsaPublicKey.addChild(new DerNode.DerInteger(rsaKey.e));
-
-  var algorithmIdentifier = new DerNode.DerSequence();
-  algorithmIdentifier.addChild
-    (new DerNode.DerOid(new OID(PrivateKeyStorage.RSA_ENCRYPTION_OID)));
-  algorithmIdentifier.addChild(new DerNode.DerNull());
-
-  var result = new DerNode.DerSequence();
-
-  result.addChild(algorithmIdentifier);
-  result.addChild(new DerNode.DerBitString(rsaPublicKey.encode().buf(), 0));
-
-  return result.encode();
-};
-
-/**
- * Convert a BigInteger to a Buffer.
- * @param {BigInteger} bigInteger The BigInteger.
- * @return {Buffer} The Buffer.
- */
-PrivateKeyStorage.bigIntegerToBuffer = function(bigInteger)
-{
-  // Imitate KJUR.asn1.ASN1Util.bigIntToMinTwosComplementsHex.
-  var hex = bigInteger.toString(16);
-  if (hex.substr(0, 1) == "-")
-    throw new Error
-      ("PrivateKeyStorage.bigIntegerToBuffer: Negative integers are not currently supported");
-
-  if (hex.length % 2 == 1)
-    // Odd number of characters.
-    hex = "0" + hex;
-  else {
-    if (! hex.match(/^[0-7]/))
-      // The first byte is >= 0x80, so prepend a zero to keep it positive.
-      hex = "00" + hex;
-  }
-
-  return new Buffer(hex, 'hex');
-};
-
-PrivateKeyStorage.RSA_ENCRYPTION_OID = "1.2.840.113549.1.1.1";
-PrivateKeyStorage.EC_ENCRYPTION_OID = "1.2.840.10045.2.1";
-/**
- * Copyright (C) 2014-2019 Regents of the University of California.
- * @author: Jeff Thompson <jefft0@remap.ucla.edu>
- * From ndn-cxx security by Yingdi Yu <yingdi@cs.ucla.edu>.
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU Lesser General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU Lesser General Public License for more details.
- *
- * You should have received a copy of the GNU Lesser General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
- * A copy of the GNU Lesser General Public License is in the file COPYING.
- */
-
-// Use capitalized Crypto to not clash with the browser's crypto.subtle.
-/** @ignore */
-var Crypto = require('../../crypto.js'); /** @ignore */
-var Blob = require('../../util/blob.js').Blob; /** @ignore */
-var SecurityException = require('../security-exception.js').SecurityException; /** @ignore */
-var PublicKey = require('../certificate/public-key.js').PublicKey; /** @ignore */
-var KeyClass = require('../security-types.js').KeyClass; /** @ignore */
-var KeyType = require('../security-types').KeyType; /** @ignore */
-var DigestAlgorithm = require('../security-types.js').DigestAlgorithm; /** @ignore */
-var DataUtils = require('../../encoding/data-utils.js').DataUtils; /** @ignore */
-var PrivateKeyStorage = require('./private-key-storage.js').PrivateKeyStorage; /** @ignore */
-var DerNode = require('../../encoding/der/der-node.js').DerNode; /** @ignore */
-var OID = require('../../encoding/oid.js').OID; /** @ignore */
-var SyncPromise = require('../../util/sync-promise.js').SyncPromise; /** @ignore */
-var UseSubtleCrypto = require('../../use-subtle-crypto-node.js').UseSubtleCrypto; /** @ignore */
-var RsaKeypair = null;
-try {
-  // This should be installed with: sudo npm install rsa-keypair
-  RsaKeypair = require('rsa-keypair');
-}
-catch (e) {}
-
-/**
- * MemoryPrivateKeyStorage class extends PrivateKeyStorage to implement private
- * key storage in memory.
- * @constructor
- */
-var MemoryPrivateKeyStorage = function MemoryPrivateKeyStorage()
-{
-  // Call the base constructor.
-  PrivateKeyStorage.call(this);
-
-  // The key is the keyName.toUri(). The value is security.certificate.PublicKey.
-  this.publicKeyStore = {};
-  // The key is the keyName.toUri(). The value is the object
-  //  {keyType,     // number from KeyType
-  //   privateKey   // The PEM-encoded private key.
-  //  }.
-  this.privateKeyStore = {};
-};
-
-MemoryPrivateKeyStorage.prototype = new PrivateKeyStorage();
-MemoryPrivateKeyStorage.prototype.name = "MemoryPrivateKeyStorage";
-
-exports.MemoryPrivateKeyStorage = MemoryPrivateKeyStorage;
-
-/**
- * Set the public key for the keyName.
- * @param {Name} keyName The key name.
- * @param {number} keyType The KeyType, such as KeyType.RSA.
- * @param {Buffer} publicKeyDer The public key DER byte array.
- */
-MemoryPrivateKeyStorage.prototype.setPublicKeyForKeyName = function
-  (keyName, keyType, publicKeyDer)
-{
-  this.publicKeyStore[keyName.toUri()] = new PublicKey
-    (new Blob(publicKeyDer, true));
-};
-
-/**
- * Set the private key for the keyName.
- * @param {Name} keyName The key name.
- * @param {number} keyType The KeyType, such as KeyType.RSA.
- * @param {Buffer} privateKeyDer The private key DER byte array.
- */
-MemoryPrivateKeyStorage.prototype.setPrivateKeyForKeyName = function
-  (keyName, keyType, privateKeyDer)
-{
-  // Encode the DER as PEM.
-  var keyBase64 = privateKeyDer.toString('base64');
-  var keyPem;
-  if (keyType === KeyType.RSA) {
-    keyPem = "-----BEGIN RSA PRIVATE KEY-----\n";
-    for (var i = 0; i < keyBase64.length; i += 64)
-      keyPem += (keyBase64.substr(i, 64) + "\n");
-    keyPem += "-----END RSA PRIVATE KEY-----";
-  }
-  else if (keyType === KeyType.EC) {
-    keyPem = "-----BEGIN EC PRIVATE KEY-----\n";
-    for (var i = 0; i < keyBase64.length; i += 64)
-      keyPem += (keyBase64.substr(i, 64) + "\n");
-    keyPem += "-----END EC PRIVATE KEY-----";
-  }
-  else
-    throw new SecurityException(new Error
-      ("MemoryPrivateKeyStorage: KeyType is not supported"));
-
-  this.privateKeyStore[keyName.toUri()] =
-    { keyType: keyType, privateKey: keyPem };
-};
-
-/**
- * Set the public and private key for the keyName.
- * @param {Name} keyName The key name.
- * @param {number} keyType The KeyType, such as KeyType.RSA.
- * @param {Buffer} publicKeyDer The public key DER byte array.
- * @param {Buffer} privateKeyDer The private key DER byte array.
- */
-MemoryPrivateKeyStorage.prototype.setKeyPairForKeyName = function
-  (keyName, keyType, publicKeyDer, privateKeyDer)
-{
-  this.setPublicKeyForKeyName(keyName, keyType, publicKeyDer);
-  this.setPrivateKeyForKeyName(keyName, keyType, privateKeyDer);
-};
-
-/**
- * Generate a pair of asymmetric keys.
- * @param {Name} keyName The name of the key pair.
- * @param {KeyParams} params The parameters of the key.
- * @param {boolean} useSync (optional) If true then use blocking crypto and
- * return a SyncPromise which is already fulfilled. If omitted or false, if
- * possible use crypto.subtle and return an async Promise, otherwise use
- * blocking crypto and return a SyncPromise.
- * @return {Promise|SyncPromise} A promise that fulfills when the pair is
- * generated.
- */
-MemoryPrivateKeyStorage.prototype.generateKeyPairPromise = function
-  (keyName, params, useSync)
-{
-  if (this.doesKeyExist(keyName, KeyClass.PUBLIC))
-    return SyncPromise.reject(new SecurityException(new Error
-      ("Public key already exists")));
-  if (this.doesKeyExist(keyName, KeyClass.PRIVATE))
-    return SyncPromise.reject(new SecurityException(new Error
-      ("Private key already exists")));
-
-  var thisStore = this;
-
-  if (UseSubtleCrypto() && !useSync) {
-    if (params.getKeyType() === KeyType.RSA) {
-      var privateKey = null;
-      var publicKeyDer = null;
-
-      return crypto.subtle.generateKey
-        ({ name: "RSASSA-PKCS1-v1_5", modulusLength: params.getKeySize(),
-           publicExponent: new Uint8Array([0x01, 0x00, 0x01]),
-           hash: {name: "SHA-256"} },
-         true, ["sign", "verify"])
-      .then(function(key) {
-        privateKey = key.privateKey;
-
-        // Export the public key to DER.
-        return crypto.subtle.exportKey("spki", key.publicKey);
-      })
-      .then(function(exportedPublicKey) {
-        publicKeyDer = new Blob(new Uint8Array(exportedPublicKey), false).buf();
-
-        // Export the private key to DER.
-        return crypto.subtle.exportKey("pkcs8", privateKey);
-      })
-      .then(function(pkcs8Der) {
-        // Crypto.subtle exports the private key as PKCS #8. Decode it to find
-        // the inner private key DER.
-        var parsedNode = DerNode.parse
-          (new Blob(new Uint8Array(pkcs8Der), false).buf());
-        // Get the value of the 3rd child which is the octet string.
-        var privateKeyDer = parsedNode.getChildren()[2].toVal();
-
-        // Save the key pair.
-        thisStore.setKeyPairForKeyName
-          (keyName, params.getKeyType(), publicKeyDer, privateKeyDer.buf());
-
-        // sign will use subtleKey directly.
-        thisStore.privateKeyStore[keyName.toUri()].subtleKey = privateKey;
-
-        return Promise.resolve();
-      });
-    }
-    else
-      return SyncPromise.reject(new SecurityException(new Error
-        ("Only RSA key generation currently supported")));
-  }
-  else {
-    return SyncPromise.resolve()
-    .then(function() {
-      if (typeof RSAKey !== 'undefined') {
-        // Assume we are in the browser.
-        if (params.getKeyType() === KeyType.RSA) {
-          var rsaKey = new RSAKey();
-          rsaKey.generate(params.getKeySize(), '010001');
-          thisStore.setKeyPairForKeyName
-            (keyName, params.getKeyType(),
-             PrivateKeyStorage.encodePublicKeyFromRSAKey(rsaKey).buf(),
-             PrivateKeyStorage.encodePkcs1PrivateKeyFromRSAKey(rsaKey).buf());
-        }
-        else
-          return SyncPromise.reject(new SecurityException(new Error
-            ("Only RSA key generation currently supported")));
-      }
-      else {
-        // Assume we are in Node.js.
-        var publicKeyDer;
-        var privateKeyPem;
-
-        if (params.getKeyType() === KeyType.RSA) {
-          if (!RsaKeypair)
-            return SyncPromise.reject(new SecurityException(new Error
-              ("Need to install rsa-keypair: sudo npm install rsa-keypair")));
-
-          var keyPair = RsaKeypair.generate(params.getKeySize());
-
-          // Get the public key DER from the PEM string.
-          var publicKeyBase64 = keyPair.publicKey.toString().replace
-            ("-----BEGIN PUBLIC KEY-----", "").replace
-            ("-----END PUBLIC KEY-----", "");
-          publicKeyDer = new Buffer(publicKeyBase64, 'base64');
-
-          privateKeyPem = keyPair.privateKey.toString();
-        }
-        else
-          return SyncPromise.reject(new SecurityException(new Error
-            ("Only RSA key generation currently supported")));
-
-        thisStore.setPublicKeyForKeyName(keyName, params.getKeyType(), publicKeyDer);
-        thisStore.privateKeyStore[keyName.toUri()] =
-          { keyType: params.getKeyType(), privateKey: privateKeyPem };
-      }
-
-      return SyncPromise.resolve();
-    });
-  }
-};
-
-/**
- * Delete a pair of asymmetric keys. If the key doesn't exist, do nothing.
- * @param {Name} keyName The name of the key pair.
- * @return {SyncPromise} A promise that fulfills when the key pair is deleted.
- */
-MemoryPrivateKeyStorage.prototype.deleteKeyPairPromise = function(keyName)
-{
-  var keyUri = keyName.toUri();
-
-  delete this.publicKeyStore[keyUri];
-  delete this.privateKeyStore[keyUri];
-
-  return SyncPromise.resolve();
-};
-
-/**
- * Get the public key
- * @param {Name} keyName The name of public key.
- * @return {SyncPromise} A promise that returns the PublicKey.
- */
-MemoryPrivateKeyStorage.prototype.getPublicKeyPromise = function(keyName)
-{
-  var keyUri = keyName.toUri();
-  var publicKey = this.publicKeyStore[keyUri];
-  if (publicKey === undefined)
-    return SyncPromise.reject(new SecurityException(new Error
-      ("MemoryPrivateKeyStorage: Cannot find public key " + keyName.toUri())));
-
-  return SyncPromise.resolve(publicKey);
-};
-
-/**
- * Fetch the private key for keyName and sign the data to produce a signature Blob.
- * @param {Buffer} data Pointer to the input byte array.
- * @param {Name} keyName The name of the signing key.
- * @param {number} digestAlgorithm (optional) The digest algorithm from
- * DigestAlgorithm, such as DigestAlgorithm.SHA256. If omitted, use
- * DigestAlgorithm.SHA256.
- * @param {boolean} useSync (optional) If true then use blocking crypto and
- * return a SyncPromise which is already fulfilled. If omitted or false, if
- * possible use crypto.subtle and return an async Promise, otherwise use
- * blocking crypto and return a SyncPromise.
- * @return {Promise|SyncPromise} A promise that returns the signature Blob.
- */
-MemoryPrivateKeyStorage.prototype.signPromise = function
-  (data, keyName, digestAlgorithm, useSync)
-{
-  useSync = (typeof digestAlgorithm === "boolean") ? digestAlgorithm : useSync;
-  digestAlgorithm = (typeof digestAlgorithm === "boolean" || !digestAlgorithm) ? DigestAlgorithm.SHA256 : digestAlgorithm;
-
-  if (digestAlgorithm != DigestAlgorithm.SHA256)
-    return SyncPromise.reject(new SecurityException(new Error
-      ("MemoryPrivateKeyStorage.sign: Unsupported digest algorithm")));
-
-  // Find the private key.
-  var keyUri = keyName.toUri();
-  var privateKey = this.privateKeyStore[keyUri];
-  if (privateKey === undefined)
-    return SyncPromise.reject(new SecurityException(new Error
-      ("MemoryPrivateKeyStorage: Cannot find private key " + keyUri)));
-
-  if (UseSubtleCrypto() && !useSync){
-    var algo = {name:"RSASSA-PKCS1-v1_5",hash:{name:"SHA-256"}};
-
-    if (!privateKey.subtleKey){
-      //this is the first time in the session that we're using crypto subtle with this key
-      //so we have to convert to pkcs8 and import it.
-      //assigning it to privateKey.subtleKey means we only have to do this once per session,
-      //giving us a small, but not insignificant, performance boost.
-      var privateDER = DataUtils.privateKeyPemToDer(privateKey.privateKey);
-      var pkcs8 = PrivateKeyStorage.encodePkcs8PrivateKey
-        (privateDER, new OID(PrivateKeyStorage.RSA_ENCRYPTION_OID),
-         new DerNode.DerNull()).buf();
-
-      var promise = crypto.subtle.importKey("pkcs8", pkcs8.buffer, algo, true, ["sign"]).then(function(subtleKey){
-        //cache the crypto.subtle key object
-        privateKey.subtleKey = subtleKey;
-        return crypto.subtle.sign(algo, subtleKey, data);
-      });
-    } else {
-      // The crypto.subtle key has been cached on a previous sign or from keygen.
-      var promise = crypto.subtle.sign(algo, privateKey.subtleKey, data);
-    }
-
-    return promise.then(function(signature){
-      var result = new Blob(new Uint8Array(signature), true);
-      return Promise.resolve(result);
-    });
-  } else {
-    var signer;
-    if (privateKey.keyType === KeyType.RSA)
-      signer = Crypto.createSign("RSA-SHA256");
-    else if (privateKey.keyType === KeyType.EC)
-      // Just create a "sha256". The Crypto library will infer ECDSA from the key.
-      signer = Crypto.createSign("sha256");
-    else
-      // We don't expect this to happen since setPrivateKeyForKeyName already checked.
-      return SyncPromise.reject(new SecurityException(new Error
-        ("MemoryPrivateKeyStorage.sign: Unrecognized private key type")));
-
-    signer.update(data);
-    var signature = new Buffer
-      (DataUtils.toNumbersIfString(signer.sign(privateKey.privateKey)));
-    var result = new Blob(signature, false);
-
-    return SyncPromise.resolve(result);
-  }
-};
-
-/**
- * Check if a particular key exists.
- * @param {Name} keyName The name of the key.
- * @param {number} keyClass The class of the key, e.g. KeyClass.PUBLIC,
- * KeyClass.PRIVATE, or KeyClass.SYMMETRIC.
- * @return {SyncPromise} A promise which returns true if the key exists.
- */
-MemoryPrivateKeyStorage.prototype.doesKeyExistPromise = function
-  (keyName, keyClass)
-{
-  var keyUri = keyName.toUri();
-  var result = false;
-  if (keyClass == KeyClass.PUBLIC)
-    result = this.publicKeyStore[keyUri] !== undefined;
-  else if (keyClass == KeyClass.PRIVATE)
-    result = this.privateKeyStore[keyUri] !== undefined;
-
-  return SyncPromise.resolve(result);
-};
-/**
- * Copyright (C) 2015-2019 Regents of the University of California.
- * @author: Jeff Thompson <jefft0@remap.ucla.edu>
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU Lesser General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU Lesser General Public License for more details.
- *
- * You should have received a copy of the GNU Lesser General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
- * A copy of the GNU Lesser General Public License is in the file COPYING.
- */
-
-// Use capitalized Crypto to not clash with the browser's crypto.subtle.
-var Crypto = require('../../crypto.js');
-// Don't require other modules since this is meant for the browser, not Node.js.
-
-/**
- * IndexedDbPrivateKeyStorage extends PrivateKeyStorage to implement private key
- * storage using the browser's IndexedDB service.
- * @constructor
- */
-var IndexedDbPrivateKeyStorage = function IndexedDbPrivateKeyStorage()
-{
-  PrivateKeyStorage.call(this);
-
-  this.database = new Dexie("ndnsec-tpm");
-  this.database.version(1).stores({
-    // "nameHash" is transformName(keyName) // string
-    // "encoding" is the public key DER     // Uint8Array
-    publicKey: "nameHash",
-
-    // "nameHash" is transformName(keyName)     // string
-    // "encoding" is the PKCS 8 private key DER // Uint8Array
-    privateKey: "nameHash"
-  });
-  this.database.open();
-};
-
-IndexedDbPrivateKeyStorage.prototype = new PrivateKeyStorage();
-IndexedDbPrivateKeyStorage.prototype.name = "IndexedDbPrivateKeyStorage";
-
-/**
- * Generate a pair of asymmetric keys.
- * @param {Name} keyName The name of the key pair.
- * @param {KeyParams} params The parameters of the key.
- * @param {boolean} useSync (optional) If true then return a rejected promise
- * since this only supports async code.
- * @return {Promise} A promise that fulfills when the pair is generated.
- */
-IndexedDbPrivateKeyStorage.prototype.generateKeyPairPromise = function
-  (keyName, params, useSync)
-{
-  if (useSync)
-    return Promise.reject(new SecurityException(new Error
-      ("IndexedDbPrivateKeyStorage.generateKeyPairPromise is only supported for async")));
-
-  var thisStorage = this;
-
-  return thisStorage.doesKeyExistPromise(keyName, KeyClass.PUBLIC)
-  .then(function(exists) {
-    if (exists)
-      throw new Error("Public key already exists");
-
-    return thisStorage.doesKeyExistPromise(keyName, KeyClass.PRIVATE);
-  })
-  .then(function(exists) {
-    if (exists)
-      throw new Error("Private key already exists");
-
-    if (params.getKeyType() === KeyType.RSA) {
-      var privateKey = null;
-      var publicKeyDer = null;
-
-      return crypto.subtle.generateKey
-        ({ name: "RSASSA-PKCS1-v1_5", modulusLength: params.getKeySize(),
-           publicExponent: new Uint8Array([0x01, 0x00, 0x01]),
-           hash: {name: "SHA-256"} },
-         true, ["sign", "verify"])
-      .then(function(key) {
-        privateKey = key.privateKey;
-
-        // Export the public key to DER.
-        return crypto.subtle.exportKey("spki", key.publicKey);
-      })
-      .then(function(exportedPublicKey) {
-        publicKeyDer = new Uint8Array(exportedPublicKey);
-
-        // Export the private key to DER.
-        return crypto.subtle.exportKey("pkcs8", privateKey);
-      })
-      .then(function(pkcs8Der) {
-        // Save the key pair
-        return thisStorage.database.transaction
-          ("rw", thisStorage.database.privateKey, thisStorage.database.publicKey, function () {
-            thisStorage.database.publicKey.put
-              ({nameHash: IndexedDbPrivateKeyStorage.transformName(keyName),
-                encoding: publicKeyDer});
-            thisStorage.database.privateKey.put
-              ({nameHash: IndexedDbPrivateKeyStorage.transformName(keyName),
-                encoding: new Uint8Array(pkcs8Der)});
-          });
-      });
-    }
-    else
-      throw new Error("Only RSA key generation currently supported");
-  });
-};
-
-
-/**
- * Delete a pair of asymmetric keys. If the key doesn't exist, do nothing.
- * @param {Name} keyName The name of the key pair.
- * @param {boolean} useSync (optional) If true then return a rejected promise
- * since this only supports async code.
- * @return {Promise} A promise that fulfills when the key pair is deleted.
- */
-IndexedDbPrivateKeyStorage.prototype.deleteKeyPairPromise = function
-  (keyName, useSync)
-{
-  if (useSync)
-    return Promise.reject(new SecurityException(new Error
-      ("IndexedDbPrivateKeyStorage.deleteKeyPairPromise is only supported for async")));
-
-  var thisStorage = this;
-  // delete does nothing if the key doesn't exist.
-  return this.database.publicKey.delete
-    (IndexedDbPrivateKeyStorage.transformName(keyName))
-  .then(function() {
-    return thisStorage.database.privateKey.delete
-      (IndexedDbPrivateKeyStorage.transformName(keyName));
-  });
-};
-
-/**
- * Get the public key
- * @param {Name} keyName The name of public key.
- * @param {boolean} useSync (optional) If true then return a rejected promise
- * since this only supports async code.
- * @return {Promise} A promise that returns the PublicKey.
- */
-IndexedDbPrivateKeyStorage.prototype.getPublicKeyPromise = function
-  (keyName, useSync)
-{
-  if (useSync)
-    return Promise.reject(new SecurityException(new Error
-      ("IndexedDbPrivateKeyStorage.getPublicKeyPromise is only supported for async")));
-
-  return this.database.publicKey.get
-    (IndexedDbPrivateKeyStorage.transformName(keyName))
-  .then(function(publicKeyEntry) {
-    return Promise.resolve(new PublicKey(new Blob(publicKeyEntry.encoding)));
-  });
-};
-
-/**
- * Fetch the private key for keyName and sign the data to produce a signature Blob.
- * @param {Buffer} data Pointer to the input byte array.
- * @param {Name} keyName The name of the signing key.
- * @param {number} digestAlgorithm (optional) The digest algorithm from
- * DigestAlgorithm, such as DigestAlgorithm.SHA256. If omitted, use
- * DigestAlgorithm.SHA256.
- * @param {boolean} useSync (optional) If true then return a rejected promise
- * since this only supports async code.
- * @return {Promise} A promise that returns the signature Blob.
- */
-IndexedDbPrivateKeyStorage.prototype.signPromise = function
-  (data, keyName, digestAlgorithm, useSync)
-{
-  useSync = (typeof digestAlgorithm === "boolean") ? digestAlgorithm : useSync;
-  digestAlgorithm = (typeof digestAlgorithm === "boolean" || !digestAlgorithm) ? DigestAlgorithm.SHA256 : digestAlgorithm;
-
-  if (useSync)
-    return Promise.reject(new SecurityException(new Error
-      ("IndexedDbPrivateKeyStorage.signPromise is only supported for async")));
-
-  if (digestAlgorithm != DigestAlgorithm.SHA256)
-    return Promise.reject(new SecurityException(new Error
-      ("IndexedDbPrivateKeyStorage.sign: Unsupported digest algorithm")));
-
-  // TODO: Support non-RSA keys.
-  var algo = { name: "RSASSA-PKCS1-v1_5", hash: {name: "SHA-256" }};
-
-  // Find the private key.
-  return this.database.privateKey.get
-    (IndexedDbPrivateKeyStorage.transformName(keyName))
-  .then(function(privateKeyEntry) {
-    return crypto.subtle.importKey
-      ("pkcs8", new Blob(privateKeyEntry.encoding).buf(), algo, true, ["sign"]);
-  })
-  .then(function(privateKey) {
-    return crypto.subtle.sign(algo, privateKey, data);
-  })
-  .then(function(signature) {
-    return Promise.resolve(new Blob(new Uint8Array(signature), true));
-  });
-};
-
-/**
- * Check if a particular key exists.
- * @param {Name} keyName The name of the key.
- * @param {number} keyClass The class of the key, e.g. KeyClass.PUBLIC,
- * KeyClass.PRIVATE, or KeyClass.SYMMETRIC.
- * @param {boolean} useSync (optional) If true then return a rejected promise
- * since this only supports async code.
- * @return {Promise} A promise which returns true if the key exists.
- */
-IndexedDbPrivateKeyStorage.prototype.doesKeyExistPromise = function
-  (keyName, keyClass, useSync)
-{
-  if (useSync)
-    return Promise.reject(new SecurityException(new Error
-      ("IndexedDbPrivateKeyStorage.doesKeyExistPromise is only supported for async")));
-
-  var table = null;
-  if (keyClass == KeyClass.PUBLIC)
-    table = this.database.publicKey;
-  else if (keyClass == KeyClass.PRIVATE)
-    table = this.database.privateKey;
-  else
-    // Silently say that anything else doesn't exist.
-    return Promise.resolve(false);
-
-  return table.where("nameHash").equals
-    (IndexedDbPrivateKeyStorage.transformName(keyName))
-  .count()
-  .then(function(count) {
-    return Promise.resolve(count > 0);
-  });
-};
-
-/**
- * Transform the key name into the base64 encoding of the hash (the same as in
- * FilePrivateKeyStorage without the file name extension).
- */
-IndexedDbPrivateKeyStorage.transformName = function(keyName)
-{
-  var hash = Crypto.createHash('sha256');
-  hash.update(new Buffer(keyName.toUri()));
-  var fileName = hash.digest('base64');
-  return fileName.replace(/\//g, '%');
-};
-/**
- * Copyright (C) 2014-2019 Regents of the University of California.
- * @author: Jeff Thompson <jefft0@remap.ucla.edu>
- * From ndn-cxx security by Yingdi Yu <yingdi@cs.ucla.edu>.
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU Lesser General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU Lesser General Public License for more details.
- *
- * You should have received a copy of the GNU Lesser General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
- * A copy of the GNU Lesser General Public License is in the file COPYING.
- */
-
-// Use capitalized Crypto to not clash with the browser's crypto.subtle.
-/** @ignore */
-var Crypto = require('../../crypto.js'); /** @ignore */
-var Name = require('../../name.js').Name; /** @ignore */
-var Data = require('../../data.js').Data; /** @ignore */
-var Blob = require('../../util/blob.js').Blob; /** @ignore */
-var ConfigFile = require('../../util/config-file.js').ConfigFile; /** @ignore */
-var DigestSha256Signature = require('../../digest-sha256-signature.js').DigestSha256Signature; /** @ignore */
-var Sha256WithRsaSignature = require('../../sha256-with-rsa-signature.js').Sha256WithRsaSignature; /** @ignore */
-var Sha256WithEcdsaSignature = require('../../sha256-with-ecdsa-signature.js').Sha256WithEcdsaSignature; /** @ignore */
-var KeyLocatorType = require('../../key-locator.js').KeyLocatorType; /** @ignore */
-var WireFormat = require('../../encoding/wire-format.js').WireFormat; /** @ignore */
-var SecurityException = require('../security-exception.js').SecurityException; /** @ignore */
-var DigestAlgorithm = require('../security-types.js').DigestAlgorithm; /** @ignore */
-var KeyType = require('../security-types.js').KeyType; /** @ignore */
-var RsaKeyParams = require('../key-params.js').RsaKeyParams; /** @ignore */
-var IdentityCertificate = require('../certificate/identity-certificate.js').IdentityCertificate; /** @ignore */
-var PublicKey = require('../certificate/public-key.js').PublicKey; /** @ignore */
-var CertificateSubjectDescription = require('../certificate/certificate-subject-description.js').CertificateSubjectDescription; /** @ignore */
-var SyncPromise = require('../../util/sync-promise.js').SyncPromise; /** @ignore */
-var BasicIdentityStorage = require('./basic-identity-storage.js').BasicIdentityStorage; /** @ignore */
-var FilePrivateKeyStorage = require('./file-private-key-storage.js').FilePrivateKeyStorage;
-
-/**
- * An IdentityManager is the interface of operations related to identity, keys,
- * and certificates.
- *
- * Create a new IdentityManager to use the IdentityStorage and
- * PrivateKeyStorage.
- * @param {IdentityStorage} identityStorage An object of a subclass of
- * IdentityStorage. In Node.js, if this is omitted then use BasicIdentityStorage.
- * @param {PrivateKeyStorage} privateKeyStorage An object of a subclass of
- * PrivateKeyStorage. In Node.js, if this is omitted then use the default
- * PrivateKeyStorage for your system, which is FilePrivateKeyStorage for any
- * system other than OS X. (OS X key chain storage is not yet implemented, so
- * you must supply a different PrivateKeyStorage.)
- * @throws SecurityException if this is not in Node.js and identityStorage or
- * privateKeyStorage is omitted.
- * @constructor
- */
-var IdentityManager = function IdentityManager
-  (identityStorage, privateKeyStorage)
-{
-  if (privateKeyStorage) {
-    // Don't call checkTpm() when using a custom PrivateKeyStorage.
-    if (!identityStorage)
-        // We don't expect this to happen.
-        throw new Error
-          ("IdentityManager: A custom privateKeyStorage is supplied with a null identityStorage")
-
-    this.identityStorage = identityStorage;
-    this.privateKeyStorage = privateKeyStorage;
-  }
-  else {
-    if (!ConfigFile)
-      // Assume we are in the browser.
-      throw new SecurityException(new Error
-        ("IdentityManager: If not in Node.js then you must supply identityStorage and privateKeyStorage."));
-    var config = new ConfigFile();
-
-    var canonicalTpmLocator = [null];
-    var thisStorage = this;
-    // Make the function that BasicIdentityStorage will call the first time it
-    // is used. It has to be an async promise becuase getTpmLocatorPromise is async.
-    function initialCheckPromise()
-    {
-      return thisStorage.checkTpmPromise_(canonicalTpmLocator[0]);
-    }
-
-    this.identityStorage = identityStorage ? identityStorage
-      : IdentityManager.getDefaultIdentityStorage_(config, initialCheckPromise);
-    this.privateKeyStorage = IdentityManager.getDefaultPrivateKeyStorage_
-      (config, canonicalTpmLocator);
-  }
-};
-
-exports.IdentityManager = IdentityManager;
-
-/**
- * Create an identity by creating a pair of Key-Signing-Key (KSK) for this
- * identity and a self-signed certificate of the KSK. If a key pair or
- * certificate for the identity already exists, use it.
- * @param {Name} identityName The name of the identity.
- * @params {KeyParams} params The key parameters if a key needs to be generated
- * for the identity.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise which returns the name of the default
- * certificate of the identity.
- */
-IdentityManager.prototype.createIdentityAndCertificatePromise = function
-  (identityName, params, useSync)
-{
-  var thisManager = this;
-  var generateKey = true;
-  var keyName = null;
-
-  return this.identityStorage.addIdentityPromise(identityName, useSync)
-  .then(function() {
-    return thisManager.identityStorage.getDefaultKeyNameForIdentityPromise
-      (identityName, useSync)
-    .then(function(localKeyName) {
-      keyName = localKeyName;
-
-      // Set generateKey.
-      return thisManager.identityStorage.getKeyPromise(keyName, useSync)
-      .then(function(publicKeyDer) {
-        var key = new PublicKey(publicKeyDer);
-        if (key.getKeyType() == params.getKeyType())
-          // The key exists and has the same type, so don't need to generate one.
-          generateKey = false;
-        return SyncPromise.resolve();
-      });
-    }, function(err) {
-      if (!(err instanceof SecurityException))
-        throw err;
-
-      // The key doesn't exist, so leave generateKey true.
-      return SyncPromise.resolve();
-    });
-  })
-  .then(function() {
-    if (generateKey)
-      return thisManager.generateKeyPairPromise(identityName, true, params, useSync)
-      .then(function(localKeyName) {
-        keyName = localKeyName;
-        return thisManager.identityStorage.setDefaultKeyNameForIdentityPromise
-          (keyName, useSync);
-      });
-    else
-      // Don't generate a key pair. Use the existing keyName.
-      return SyncPromise.resolve();
-  })
-  .then(function() {
-    return thisManager.identityStorage.getDefaultCertificateNameForKeyPromise
-      (keyName, useSync)
-    .then(function(certName) {
-      // The cert exists, so don't need to make it.
-      return SyncPromise.resolve(certName);
-    }, function(err) {
-      if (!(err instanceof SecurityException))
-        throw err;
-
-      // The cert doesn't exist, so make one.
-      var certName;
-      return thisManager.selfSignPromise(keyName, useSync)
-      .then(function(selfCert) {
-        certName = selfCert.getName();
-        return thisManager.addCertificateAsIdentityDefaultPromise(selfCert, useSync);
-      })
-      .then(function() {
-        return SyncPromise.resolve(certName);
-      });
-    });
-  });
-};
-
-/**
- * Create an identity by creating a pair of Key-Signing-Key (KSK) for this
- * identity and a self-signed certificate of the KSK. If a key pair or
- * certificate for the identity already exists, use it.
- * @param {Name} identityName The name of the identity.
- * @params {KeyParams} params The key parameters if a key needs to be generated
- * for the identity.
- * @param {function} onComplete (optional) This calls onComplete(certificateName)
- * with the name of the default certificate of the identity. If omitted, the
- * return value is described below. (Some crypto libraries only use a callback,
- * so onComplete is required to use these.)
- * @param {function} onError (optional) If defined, then onComplete must be
- * defined and if there is an exception, then this calls onError(exception)
- * with the exception. If onComplete is defined but onError is undefined, then
- * this will log any thrown exception. (Some crypto libraries only use a
- * callback, so onError is required to be notified of an exception.)
- * @return {Name} If onComplete is omitted, return the name of the default
- * certificate of the identity. Otherwise, if onComplete is supplied then return
- * undefined and use onComplete as described above.
- */
-IdentityManager.prototype.createIdentityAndCertificate = function
-  (identityName, params, onComplete, onError)
-{
-  return SyncPromise.complete(onComplete, onError,
-    this.createIdentityAndCertificatePromise(identityName, params, !onComplete));
-};
-
-/**
- * Create an identity by creating a pair of Key-Signing-Key (KSK) for this
- * identity and a self-signed certificate of the KSK. If a key pair or
- * certificate for the identity already exists, use it.
- * @deprecated Use createIdentityAndCertificate which returns the
- * certificate name instead of the key name. You can use
- * IdentityCertificate.certificateNameToPublicKeyName to convert the
- * certificate name to the key name.
- * @param {Name} identityName The name of the identity.
- * @params {KeyParams} params The key parameters if a key needs to be generated
- * for the identity.
- * @return {Name} The key name of the auto-generated KSK of the identity.
- */
-IdentityManager.prototype.createIdentity = function(identityName, params)
-{
-  return IdentityCertificate.certificateNameToPublicKeyName
-    (this.createIdentityAndCertificate(identityName, params));
-};
-
-/**
- * Delete the identity from the public and private key storage. If the
- * identity to be deleted is the current default system default, this will not
- * delete the identity and will return immediately.
- * @param {Name} identityName The name of the identity.
- * @param {function} onComplete (optional) This calls onComplete() when the
- * operation is complete. If omitted, do not use it. (Some database libraries
- * only use a callback, so onComplete is required to use these.)
- * @param {function} onError (optional) If defined, then onComplete must be
- * defined and if there is an exception, then this calls onError(exception)
- * with the exception. If onComplete is defined but onError is undefined, then
- * this will log any thrown exception. (Some database libraries only use a
- * callback, so onError is required to be notified of an exception.)
- */
-IdentityManager.prototype.deleteIdentity = function
-  (identityName, onComplete, onError)
-{
-  var useSync = !onComplete;
-  var thisManager = this;
-
-  var doDelete = true;
-
-  var mainPromise = this.identityStorage.getDefaultIdentityPromise(useSync)
-  .then(function(defaultIdentityName) {
-    if (defaultIdentityName.equals(identityName))
-      // Don't delete the default identity!
-      doDelete = false;
-
-    return SyncPromise.resolve();
-  }, function(err) {
-    // There is no default identity to check.
-    return SyncPromise.resolve();
-  })
-  .then(function() {
-    if (!doDelete)
-      return SyncPromise.resolve();
-
-    var keysToDelete = [];
-    return thisManager.identityStorage.getAllKeyNamesOfIdentityPromise
-      (identityName, keysToDelete, true)
-    .then(function() {
-      return thisManager.identityStorage.getAllKeyNamesOfIdentityPromise
-        (identityName, keysToDelete, false);
-    })
-    .then(function() {
-      return thisManager.identityStorage.deleteIdentityInfoPromise(identityName);
-    })
-    .then(function() {
-      // Recursively loop through keysToDelete, calling deleteKeyPairPromise.
-      function deleteKeyLoop(i) {
-        if (i >= keysToDelete.length)
-          return SyncPromise.resolve();
-
-        return thisManager.privateKeyStorage.deleteKeyPairPromise(keysToDelete[i])
-        .then(function() {
-          return deleteKeyLoop(i + 1);
-        });
-      }
-
-      return deleteKeyLoop(0);
-    });
-  });
-
-  return SyncPromise.complete(onComplete, onError, mainPromise);
-};
-
-/**
- * Set the default identity.  If the identityName does not exist, then clear the
- * default identity so that getDefaultIdentity() throws an exception.
- * @param {Name} identityName The default identity name.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise which fulfills when the default
- * identity is set.
- */
-IdentityManager.prototype.setDefaultIdentityPromise = function
-  (identityName, useSync)
-{
-  return this.identityStorage.setDefaultIdentityPromise(identityName, useSync);
-};
-
-/**
- * Set the default identity.  If the identityName does not exist, then clear the
- * default identity so that getDefaultIdentity() throws an exception.
- * @param {Name} identityName The default identity name.
- * @param {function} onComplete (optional) This calls onComplete() when complete.
- * (Some database libraries only use a callback, so onComplete is required to
- * use these.)
- * @param {function} onError (optional) If defined, then onComplete must be
- * defined and if there is an exception, then this calls onError(exception)
- * with the exception. If onComplete is defined but onError is undefined, then
- * this will log any thrown exception. (Some database libraries only use a
- * callback, so onError is required to be notified of an exception.)
- */
-IdentityManager.prototype.setDefaultIdentity = function
-  (identityName, onComplete, onError)
-{
-  return SyncPromise.complete(onComplete, onError,
-    this.identityStorage.setDefaultIdentityPromise(identityName, !onComplete));
-};
-
-/**
- * Get the default identity.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise which returns the Name of default
- * identity, or a promise rejected with SecurityException if the default
- * identity is not set.
- */
-IdentityManager.prototype.getDefaultIdentityPromise = function(useSync)
-{
-  return this.identityStorage.getDefaultIdentityPromise(useSync);
-};
-
-/**
- * Get the default identity.
- * @param {function} onComplete (optional) This calls onComplete(identityName)
- * with name of the default identity. If omitted, the return value is described
- * below. (Some database libraries only use a callback, so onComplete is required
- * to use these.)
- * @param {function} onError (optional) If defined, then onComplete must be
- * defined and if there is an exception, then this calls onError(exception)
- * with the exception. If onComplete is defined but onError is undefined, then
- * this will log any thrown exception. (Some database libraries only use a
- * callback, so onError is required to be notified of an exception.)
- * @return {Name} If onComplete is omitted, return the name of the default
- * identity. Otherwise, if onComplete is supplied then return undefined and use
- * onComplete as described above.
- * @throws SecurityException if the default identity is not set. However, if
- * onComplete and onError are defined, then if there is an exception return
- * undefined and call onError(exception).
- */
-IdentityManager.prototype.getDefaultIdentity = function(onComplete, onError)
-{
-  return SyncPromise.complete(onComplete, onError,
-    this.identityStorage.getDefaultIdentityPromise(!onComplete));
-};
-
-/**
- * Get the certificate of the default identity.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise which returns the requested
- * IdentityCertificate or null if not found.
- */
-IdentityManager.prototype.getDefaultCertificatePromise = function(useSync)
-{
-  return this.identityStorage.getDefaultCertificatePromise(useSync);
-};
-
-/**
- * Generate a pair of RSA keys for the specified identity.
- * @param {Name} identityName The name of the identity.
- * @param {boolean} isKsk True for generating a Key-Signing-Key (KSK), false for
- * a Data-Signing-Key (DSK).
- * @param {number} keySize The size of the key.
- * @return {Name} The generated key name.
- */
-IdentityManager.prototype.generateRSAKeyPair = function
-  (identityName, isKsk, keySize)
-{
-  // For now, require sync. This method may be removed from the API.
-  return SyncPromise.getValue
-    (this.generateKeyPairPromise
-     (identityName, isKsk, new RsaKeyParams(keySize), true));
-};
-
-/**
- * Set a key as the default key of an identity. The identity name is inferred
- * from keyName.
- * @param {Name} keyName The name of the key.
- * @param {Name} identityNameCheck (optional) The identity name to check that the
- * keyName contains the same identity name. If an empty name, it is ignored.
- * @param {function} onComplete (optional) This calls onComplete() when complete.
- * (Some database libraries only use a callback, so onComplete is required to
- * use these.)
- * @param {function} onError (optional) If defined, then onComplete must be
- * defined and if there is an exception, then this calls onError(exception)
- * with the exception. If onComplete is defined but onError is undefined, then
- * this will log any thrown exception. (Some database libraries only use a
- * callback, so onError is required to be notified of an exception.)
- */
-IdentityManager.prototype.setDefaultKeyForIdentity = function
-  (keyName, identityNameCheck, onComplete, onError)
-{
-  onError = (typeof identityNameCheck === "function") ? onComplete : onError;
-  onComplete = (typeof identityNameCheck === "function") ?
-    identityNameCheck : onComplete;
-  identityNameCheck = (typeof identityNameCheck === "function" || !identityNameCheck) ?
-    new Name() : identityNameCheck;
-
-  return SyncPromise.complete(onComplete, onError,
-    this.identityStorage.setDefaultKeyNameForIdentityPromise
-      (keyName, identityNameCheck, !onComplete));
-};
-
-/**
- * Get the default key for an identity.
- * @param {Name} identityName The name of the identity.
- * @param {function} onComplete (optional) This calls onComplete(keyName)
- * with name of the default key. If omitted, the return value is described
- * below. (Some database libraries only use a callback, so onComplete is required
- * to use these.)
- * @param {function} onError (optional) If defined, then onComplete must be
- * defined and if there is an exception, then this calls onError(exception)
- * with the exception. If onComplete is defined but onError is undefined, then
- * this will log any thrown exception. (Some database libraries only use a
- * callback, so onError is required to be notified of an exception.)
- * @return {Name} If onComplete is omitted, return the default key name.
- * Otherwise, if onComplete is supplied then return undefined and use onComplete
- * as described above.
- * @throws SecurityException if the default key name for the identity is not set.
- * However, if onComplete and onError are defined, then if there is an exception
- * return undefined and call onError(exception).
- */
-IdentityManager.prototype.getDefaultKeyNameForIdentity = function
-  (identityName, onComplete, onError)
-{
-  return SyncPromise.complete(onComplete, onError,
-    this.identityStorage.getDefaultKeyNameForIdentityPromise
-      (identityName, !onComplete));
-};
-
-/**
- * Generate a pair of RSA keys for the specified identity and set it as default
- * key for the identity.
- * @param {Name} identityName The name of the identity.
- * @param {boolean} isKsk True for generating a Key-Signing-Key (KSK), false for
- * a Data-Signing-Key (DSK).
- * @param {number} keySize The size of the key.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If false, this may return a SyncPromise or an async
- * Promise.
- * @return {Promise|SyncPromise} A promise which returns the generated key name.
- */
-IdentityManager.prototype.generateRSAKeyPairAsDefaultPromise = function
-  (identityName, isKsk, keySize, useSync)
-{
-  var newKeyName;
-  var thisManager = this;
-  return this.generateKeyPairPromise(identityName, isKsk, new RsaKeyParams(keySize))
-  .then(function(localKeyName) {
-    newKeyName = localKeyName;
-
-    return thisManager.identityStorage.setDefaultKeyNameForIdentityPromise
-      (newKeyName);
-  })
-  .then(function() {
-    return SyncPromise.resolve(newKeyName);
-  });
-};
-
-/**
- * Generate a pair of RSA keys for the specified identity and set it as default
- * key for the identity.
- * @param {Name} identityName The name of the identity.
- * @param {boolean} isKsk True for generating a Key-Signing-Key (KSK), false for
- * a Data-Signing-Key (DSK).
- * @param {number} keySize The size of the key.
- * @return {Name} The generated key name.
- */
-IdentityManager.prototype.generateRSAKeyPairAsDefault = function
-  (identityName, isKsk, keySize)
-{
-  return SyncPromise.getValue
-    (this.generateRSAKeyPairAsDefaultPromise(identityName, isKsk, keySize, true));
-};
-
-/**
- * Get the public key with the specified name.
- * @param {Name} keyName The name of the key.
- * @param {function} onComplete (optional) This calls onComplete(publicKey)
- * with PublicKey. If omitted, the return value is described below. (Some database
- * libraries only use a callback, so onComplete is required to use these.)
- * @param {function} onError (optional) If defined, then onComplete must be
- * defined and if there is an exception, then this calls onError(exception)
- * with the exception. If onComplete is defined but onError is undefined, then
- * this will log any thrown exception. (Some database libraries only use a
- * callback, so onError is required to be notified of an exception.)
- * @return {PublicKey} If onComplete is omitted, return the public key.
- * Otherwise, if onComplete is supplied then return undefined and use onComplete
- * as described above.
- */
-IdentityManager.prototype.getPublicKey = function(keyName, onComplete, onError)
-{
-  return SyncPromise.complete(onComplete, onError,
-    this.identityStorage.getKeyPromise(keyName, !onComplete)
-    .then(function(keyDer) {
-      return SyncPromise.resolve(new PublicKey(keyDer));
-    }));
-};
-
-// TODO: Add two versions of createIdentityCertificate.
-
-/**
- * Prepare an unsigned identity certificate.
- * @param {Name} keyName The key name, e.g., `/{identity_name}/ksk-123456`.
- * @param {PublicKey} publicKey (optional) The public key to sign. If ommited,
- * use the keyName to get the public key from the identity storage.
- * @param {Name} signingIdentity The signing identity.
- * @param {number} notBefore See IdentityCertificate.
- * @param {number} notAfter See IdentityCertificate.
- * @param {Array<CertificateSubjectDescription>} subjectDescription A list of
- * CertificateSubjectDescription. See IdentityCertificate. If null or empty,
- * this adds a an ATTRIBUTE_NAME based on the keyName.
- * @param {Name} certPrefix (optional) The prefix before the `KEY` component. If
- * null or omitted, this infers the certificate name according to the relation
- * between the signingIdentity and the subject identity. If the signingIdentity
- * is a prefix of the subject identity, `KEY` will be inserted after the
- * signingIdentity, otherwise `KEY` is inserted after subject identity (i.e.,
- * before `ksk-...`).
- * @param {function} onComplete (optional) This calls onComplete(certificate)
- * with the unsigned IdentityCertificate, or null if the inputs are invalid. If
- * omitted, the return value is described below. (Some database libraries only
- * use a callback, so onComplete is required to use these.)
- * @param {function} onError (optional) If defined, then onComplete must be
- * defined and if there is an exception, then this calls onError(exception)
- * with the exception. If onComplete is defined but onError is undefined, then
- * this will log any thrown exception. (Some database libraries only use a
- * callback, so onError is required to be notified of an exception.)
- * @return {IdentityCertificate} If onComplete is omitted, return the the
- * unsigned IdentityCertificate, or null if the inputs are invalid. Otherwise,
- * if onComplete is supplied then return undefined and use onComplete as
- * described above.
- */
-IdentityManager.prototype.prepareUnsignedIdentityCertificate = function
-  (keyName, publicKey, signingIdentity, notBefore, notAfter, subjectDescription,
-   certPrefix, onComplete, onError)
-{
-  if (!(publicKey instanceof PublicKey)) {
-    // The publicKey was omitted. Shift arguments.
-    onError = onComplete;
-    onComplete = certPrefix;
-    certPrefix = subjectDescription;
-    subjectDescription = notAfter;
-    notAfter = notBefore;
-    notBefore = signingIdentity;
-    signingIdentity = publicKey;
-    publicKey = null;
-  }
-
-  // certPrefix may be omitted or null, so check for it and the following args.
-  var arg7 = certPrefix;
-  var arg8 = onComplete;
-  var arg9 = onError;
-  if (arg7 instanceof Name)
-    certPrefix = arg7;
-  else
-    certPrefix = null;
-
-  if (typeof arg7 === 'function') {
-    onComplete = arg7;
-    onError = arg8;
-  }
-  else if (typeof arg8 === 'function') {
-    onComplete = arg8;
-    onError = arg9;
-  }
-  else {
-    onComplete = null;
-    onError = null;
-  }
-
-  var promise;
-  if (publicKey == null)
-    promise =  this.prepareUnsignedIdentityCertificatePromise
-      (keyName, signingIdentity, notBefore, notAfter, subjectDescription,
-       certPrefix, !onComplete);
-  else
-    promise =  this.prepareUnsignedIdentityCertificatePromise
-      (keyName, publicKey, signingIdentity, notBefore, notAfter,
-       subjectDescription, certPrefix, !onComplete);
-  return SyncPromise.complete(onComplete, onError, promise);
-};
-
-/**
- * Prepare an unsigned identity certificate.
- * @param {Name} keyName The key name, e.g., `/{identity_name}/ksk-123456`.
- * @param {PublicKey} publicKey (optional) The public key to sign. If ommited,
- * use the keyName to get the public key from the identity storage.
- * @param {Name} signingIdentity The signing identity.
- * @param {number} notBefore See IdentityCertificate.
- * @param {number} notAfter See IdentityCertificate.
- * @param {Array<CertificateSubjectDescription>} subjectDescription A list of
- * CertificateSubjectDescription. See IdentityCertificate. If null or empty,
- * this adds a an ATTRIBUTE_NAME based on the keyName.
- * @param {Name} certPrefix (optional) The prefix before the `KEY` component. If
- * null or omitted, this infers the certificate name according to the relation
- * between the signingIdentity and the subject identity. If the signingIdentity
- * is a prefix of the subject identity, `KEY` will be inserted after the
- * signingIdentity, otherwise `KEY` is inserted after subject identity (i.e.,
- * before `ksk-...`).
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise that returns the unsigned
- * IdentityCertificate, or that returns null if the inputs are invalid.
- */
-IdentityManager.prototype.prepareUnsignedIdentityCertificatePromise = function
-  (keyName, publicKey, signingIdentity, notBefore, notAfter, subjectDescription,
-   certPrefix, useSync)
-{
-  if (!(publicKey instanceof PublicKey)) {
-    // The publicKey was omitted. Shift arguments.
-    useSync = certPrefix;
-    certPrefix = subjectDescription;
-    subjectDescription = notAfter;
-    notAfter = notBefore;
-    notBefore = signingIdentity;
-    signingIdentity = publicKey;
-    publicKey = null;
-  }
-
-  // certPrefix may be omitted or null, so check for it and the following arg.
-  var arg7 = certPrefix;
-  var arg8 = useSync;
-  if (arg7 instanceof Name)
-    certPrefix = arg7;
-  else
-    certPrefix = null;
-
-  if (typeof arg7 === 'boolean')
-    useSync = arg7;
-  else if (typeof arg8 === 'boolean')
-    useSync = arg8;
-  else
-    useSync = false;
-
-  var promise;
-  if (publicKey == null) {
-    promise = this.identityStorage.getKeyPromise(keyName, useSync)
-    .then(function(keyDer) {
-      publicKey = new PublicKey(keyDer);
-      return SyncPromise.resolve();
-    });
-  }
-  else
-    promise = SyncPromise.resolve();
-
-  return promise
-  .then(function() {
-    return SyncPromise.resolve
-      (IdentityManager.prepareUnsignedIdentityCertificateHelper_
-       (keyName, publicKey, signingIdentity, notBefore, notAfter,
-        subjectDescription, certPrefix));
-  });
-};
-
-/**
- * A helper for prepareUnsignedIdentityCertificatePromise where the publicKey
- * is known.
- */
-IdentityManager.prepareUnsignedIdentityCertificateHelper_ = function
-  (keyName, publicKey, signingIdentity, notBefore, notAfter, subjectDescription,
-   certPrefix)
-{
-  if (keyName.size() < 1)
-    return null;
-
-  var tempKeyIdPrefix = keyName.get(-1).toEscapedString();
-  if (tempKeyIdPrefix.length < 4)
-    return null;
-  keyIdPrefix = tempKeyIdPrefix.substr(0, 4);
-  if (keyIdPrefix != "ksk-" && keyIdPrefix != "dsk-")
-    return null;
-
-  var certificate = new IdentityCertificate();
-  var certName = new Name();
-
-  if (certPrefix == null) {
-    // No certificate prefix hint, so infer the prefix.
-    if (signingIdentity.match(keyName))
-      certName.append(signingIdentity)
-        .append("KEY")
-        .append(keyName.getSubName(signingIdentity.size()))
-        .append("ID-CERT")
-        .appendVersion(new Date().getTime());
-    else
-      certName.append(keyName.getPrefix(-1))
-        .append("KEY")
-        .append(keyName.get(-1))
-        .append("ID-CERT")
-        .appendVersion(new Date().getTime());
-  }
-  else {
-    // A cert prefix hint is supplied, so determine the cert name.
-    if (certPrefix.match(keyName) && !certPrefix.equals(keyName))
-      certName.append(certPrefix)
-        .append("KEY")
-        .append(keyName.getSubName(certPrefix.size()))
-        .append("ID-CERT")
-        .appendVersion(new Date().getTime());
-    else
-      return null;
-  }
-
-  certificate.setName(certName);
-  certificate.setNotBefore(notBefore);
-  certificate.setNotAfter(notAfter);
-  certificate.setPublicKeyInfo(publicKey);
-
-  if (subjectDescription == null || subjectDescription.length === 0)
-    certificate.addSubjectDescription(new CertificateSubjectDescription
-      ("2.5.4.41", keyName.getPrefix(-1).toUri()));
-  else {
-    for (var i = 0; i < subjectDescription.length; ++i)
-      certificate.addSubjectDescription(subjectDescription[i]);
-  }
-
-  try {
-    certificate.encode();
-  } catch (ex) {
-    throw SecurityException(new Error("DerEncodingException: " + ex));
-  }
-
-  return certificate;
-};
-
-/**
- * Add a certificate into the public key identity storage.
- * @param {IdentityCertificate} certificate The certificate to to added. This
- * makes a copy of the certificate.
- * @param {function} onComplete (optional) This calls onComplete() when complete.
- * (Some database libraries only use a callback, so onComplete is required to
- * use these.)
- * @param {function} onError (optional) If defined, then onComplete must be
- * defined and if there is an exception, then this calls onError(exception)
- * with the exception. If onComplete is defined but onError is undefined, then
- * this will log any thrown exception. (Some database libraries only use a
- * callback, so onError is required to be notified of an exception.)
- */
-IdentityManager.prototype.addCertificate = function
-  (certificate, onComplete, onError)
-{
-  return SyncPromise.complete(onComplete, onError,
-    this.identityStorage.addCertificatePromise(certificate, !onComplete));
-};
-
-/**
- * Set the certificate as the default for its corresponding key.
- * @param {IdentityCertificate} certificate The certificate.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If false, this may return a SyncPromise or an async
- * Promise.
- * @return {Promise|SyncPromise} A promise which fulfills when the default
- * certificate is set.
- */
-IdentityManager.prototype.setDefaultCertificateForKeyPromise = function
-  (certificate, useSync)
-{
-  var thisManager = this;
-
-  var keyName = certificate.getPublicKeyName();
-  return this.identityStorage.doesKeyExistPromise(keyName, useSync)
-  .then(function(exists) {
-    if (!exists)
-      throw new SecurityException(new Error
-        ("No corresponding Key record for certificate!"));
-
-    return thisManager.identityStorage.setDefaultCertificateNameForKeyPromise
-      (keyName, certificate.getName(), useSync);
-  });
-};
-
-/**
- * Set the certificate as the default for its corresponding key.
- * @param {IdentityCertificate} certificate The certificate.
- * @param {function} onComplete (optional) This calls onComplete() when complete.
- * (Some database libraries only use a callback, so onComplete is required to
- * use these.)
- * @param {function} onError (optional) If defined, then onComplete must be
- * defined and if there is an exception, then this calls onError(exception)
- * with the exception. If onComplete is defined but onError is undefined, then
- * this will log any thrown exception. (Some database libraries only use a
- * callback, so onError is required to be notified of an exception.)
- */
-IdentityManager.prototype.setDefaultCertificateForKey = function
-  (certificate, onComplete, onError)
-{
-  return SyncPromise.complete(onComplete, onError,
-    this.setDefaultCertificateForKeyPromise(certificate, !onComplete));
-};
-
-/**
- * Add a certificate into the public key identity storage and set the
- * certificate as the default for its corresponding identity.
- * @param {IdentityCertificate} certificate The certificate to be added. This
- * makes a copy of the certificate.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If false, this may return a SyncPromise or an async
- * Promise.
- * @return {Promise|SyncPromise} A promise which fulfills when the certificate
- * is added.
- */
-IdentityManager.prototype.addCertificateAsIdentityDefaultPromise = function
-  (certificate, useSync)
-{
-  var thisManager = this;
-  return this.identityStorage.addCertificatePromise(certificate, useSync)
-  .then(function() {
-    var keyName = certificate.getPublicKeyName();
-    return thisManager.identityStorage.setDefaultKeyNameForIdentityPromise
-      (keyName, useSync);
-  })
-  .then(function() {
-    return thisManager.setDefaultCertificateForKeyPromise(certificate, useSync);
-  });
-};
-
-/**
- * Add a certificate into the public key identity storage and set the
- * certificate as the default of its corresponding key.
- * @param {IdentityCertificate} certificate The certificate to be added. This
- * makes a copy of the certificate.
- * @param {function} onComplete (optional) This calls onComplete() when complete.
- * (Some database libraries only use a callback, so onComplete is required to use
- * these.)
- * @param {function} onError (optional) If defined, then onComplete must be
- * defined and if there is an exception, then this calls onError(exception)
- * with the exception. If onComplete is defined but onError is undefined, then
- * this will log any thrown exception. (Some database libraries only use a
- * callback, so onError is required to be notified of an exception.)
- */
-IdentityManager.prototype.addCertificateAsDefault = function
-  (certificate, onComplete, onError)
-{
-  var useSync = !onComplete;
-  var thisManager = this;
-
-  return SyncPromise.complete(onComplete, onError,
-    this.identityStorage.addCertificatePromise(certificate, useSync)
-    .then(function() {
-      return thisManager.setDefaultCertificateForKeyPromise(certificate, useSync);
-    }));
-};
-
-/**
- * Get a certificate which is still valid with the specified name.
- * @param {Name} certificateName The name of the requested certificate.
- * @param {function} onComplete (optional) This calls onComplete(certificate)
- * with the requested IdentityCertificate. If omitted, the return value is
- * described below. (Some database libraries only use a callback, so onComplete
- * is required to use these.)
- * @param {function} onError (optional) If defined, then onComplete must be
- * defined and if there is an exception, then this calls onError(exception)
- * with the exception. If onComplete is defined but onError is undefined, then
- * this will log any thrown exception. (Some database libraries only use a
- * callback, so onError is required to be notified of an exception.)
- * @return {IdentityCertificate} If onComplete is omitted, return the requested
- * certificate. Otherwise, if onComplete is supplied then return undefined and
- * use onComplete as described above.
- */
-IdentityManager.prototype.getCertificate = function
-  (certificateName, onComplete, onError)
-{
-  return SyncPromise.complete(onComplete, onError,
-    this.identityStorage.getCertificatePromise
-      (certificateName, false, !onComplete));
-};
-
-/**
- * Get the default certificate name for the specified identity.
- * @param {Name} identityName The identity name.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise which returns the default certificate
- * Name, or a promise rejected with SecurityException if the default key name
- * for the identity is not set or the default certificate name for the key name
- * is not set.
- */
-IdentityManager.prototype.getDefaultCertificateNameForIdentityPromise = function
-  (identityName, useSync)
-{
-  return this.identityStorage.getDefaultCertificateNameForIdentityPromise
-    (identityName, useSync);
-}
-
-/**
- * Get the default certificate name for the specified identity, which will be
- * used when signing is performed based on identity.
- * @param {Name} identityName The name of the specified identity.
- * @param {function} onComplete (optional) This calls onComplete(certificateName)
- * with name of the default certificate. If omitted, the return value is described
- * below. (Some database libraries only use a callback, so onComplete is required
- * to use these.)
- * @param {function} onError (optional) If defined, then onComplete must be
- * defined and if there is an exception, then this calls onError(exception)
- * with the exception. If onComplete is defined but onError is undefined, then
- * this will log any thrown exception. (Some database libraries only use a
- * callback, so onError is required to be notified of an exception.)
- * @return {Name} If onComplete is omitted, return the default certificate name.
- * Otherwise, if onComplete is supplied then return undefined and use
- * onComplete as described above.
- * @throws SecurityException if the default key name for the identity is not
- * set or the default certificate name for the key name is not set. However, if
- * onComplete and onError are defined, then if there is an exception return
- * undefined and call onError(exception).
- */
-IdentityManager.prototype.getDefaultCertificateNameForIdentity = function
-  (identityName, onComplete, onError)
-{
-  return SyncPromise.complete(onComplete, onError,
-    this.identityStorage.getDefaultCertificateNameForIdentityPromise
-      (identityName, !onComplete));
-};
-
-/**
- * Get the default certificate name of the default identity, which will be used
- * when signing is based on identity and the identity is not specified.
- * @param {function} onComplete (optional) This calls onComplete(certificateName)
- * with name of the default certificate. If omitted, the return value is described
- * below. (Some database libraries only use a callback, so onComplete is required
- * to use these.)
- * @param {function} onError (optional) If defined, then onComplete must be
- * defined and if there is an exception, then this calls onError(exception)
- * with the exception. If onComplete is defined but onError is undefined, then
- * this will log any thrown exception. (Some database libraries only use a
- * callback, so onError is required to be notified of an exception.)
- * @return {Name} If onComplete is omitted, return the default certificate name.
- * Otherwise, if onComplete is supplied then return undefined and use
- * onComplete as described above.
- * @throws SecurityException if the default identity is not set or the default
- * key name for the identity is not set or the default certificate name for
- * the key name is not set. However, if onComplete and onError are defined, then
- * if there is an exception return undefined and call onError(exception).
- */
-IdentityManager.prototype.getDefaultCertificateName = function
-  (onComplete, onError)
-{
-  var useSync = !onComplete;
-  var thisManager = this;
-
-  return SyncPromise.complete(onComplete, onError,
-    this.identityStorage.getDefaultIdentityPromise(useSync)
-    .then(function(identityName) {
-      return thisManager.identityStorage.getDefaultCertificateNameForIdentityPromise
-        (identityName, useSync);
-    }));
-};
-
-/**
- * Append all the identity names to the nameList.
- * @param {Array<Name>} nameList Append result names to nameList.
- * @param {boolean} isDefault If true, add only the default identity name. If
- * false, add only the non-default identity names.
- * @param {function} onComplete (optional) This calls onComplete() when finished
- * adding to nameList. If omitted, this returns when complete. (Some database
- * libraries only use a callback, so onComplete is required to use these.)
- * @param {function} onError (optional) If defined, then onComplete must be
- * defined and if there is an exception, then this calls onError(exception)
- * with the exception. If onComplete is defined but onError is undefined, then
- * this will log any thrown exception. (Some database libraries only use a
- * callback, so onError is required to be notified of an exception.)
- * @return {void} If onComplete is omitted, return when complete. Otherwise, if
- * onComplete is supplied then return undefined and use onComplete as described
- * above.
- */
-IdentityManager.prototype.getAllIdentities = function
-  (nameList, isDefault, onComplete, onError)
-{
-  return SyncPromise.complete(onComplete, onError,
-    this.identityStorage.getAllIdentitiesPromise
-      (nameList, isDefault, !onComplete));
-};
-
-/**
- * Append all the key names of a particular identity to the nameList.
- * @param {Name} identityName The identity name to search for.
- * @param {Array<Name>} nameList Append result names to nameList.
- * @param {boolean} isDefault If true, add only the default key name. If false,
- * add only the non-default key names.
- * @param {function} onComplete (optional) This calls onComplete() when finished
- * adding to nameList. If omitted, this returns when complete. (Some database
- * libraries only use a callback, so onComplete is required to use these.)
- * @param {function} onError (optional) If defined, then onComplete must be
- * defined and if there is an exception, then this calls onError(exception)
- * with the exception. If onComplete is defined but onError is undefined, then
- * this will log any thrown exception. (Some database libraries only use a
- * callback, so onError is required to be notified of an exception.)
- * @return {void} If onComplete is omitted, return when complete. Otherwise, if
- * onComplete is supplied then return undefined and use onComplete as described
- * above.
- */
-IdentityManager.prototype.getAllKeyNamesOfIdentity = function
-  (identityName, nameList, isDefault, onComplete, onError)
-{
-  return SyncPromise.complete(onComplete, onError,
-    this.identityStorage.getAllKeyNamesOfIdentityPromise
-      (identityName, nameList, isDefault, !onComplete));
-};
-
-/**
- * Append all the certificate names of a particular key name to the nameList.
- * @param {Name} keyName The key name to search for.
- * @param {Array<Name>} nameList Append result names to nameList.
- * @param {boolean} isDefault If true, add only the default certificate name. If
- * false, add only the non-default certificate names.
- * @param {function} onComplete (optional) This calls onComplete() when finished
- * adding to nameList. If omitted, this returns when complete. (Some database
- * libraries only use a callback, so onComplete is required to use these.)
- * @param {function} onError (optional) If defined, then onComplete must be
- * defined and if there is an exception, then this calls onError(exception)
- * with the exception. If onComplete is defined but onError is undefined, then
- * this will log any thrown exception. (Some database libraries only use a
- * callback, so onError is required to be notified of an exception.)
- * @return {void} If onComplete is omitted, return when complete. Otherwise, if
- * onComplete is supplied then return undefined and use onComplete as described
- * above.
- */
-IdentityManager.prototype.getAllCertificateNamesOfKey = function
-  (keyName, nameList, isDefault, onComplete, onError)
-{
-  return SyncPromise.complete(onComplete, onError,
-    this.identityStorage.getAllCertificateNamesOfKeyPromise
-      (keyName, nameList, isDefault, !onComplete));
-};
-
-/**
- * Sign the Data packet or byte array data based on the certificate name.
- * @param {Data|Buffer} target If this is a Data object, wire encode for signing,
- * update its signature and key locator field and wireEncoding. If it is a
- * Buffer, sign it to produce a Signature object.
- * @param {Name} certificateName The Name identifying the certificate which
- * identifies the signing key.
- * @param {WireFormat} (optional) The WireFormat for calling encodeData, or
- * WireFormat.getDefaultWireFormat() if omitted.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise that returns the generated Signature
- * object (if target is a Buffer) or the target (if target is Data).
- */
-IdentityManager.prototype.signByCertificatePromise = function
-  (target, certificateName, wireFormat, useSync)
-{
-  useSync = (typeof wireFormat === "boolean") ? wireFormat : useSync;
-  wireFormat = (typeof wireFormat === "boolean" || !wireFormat) ? WireFormat.getDefaultWireFormat() : wireFormat;
-
-  var keyName = IdentityManager.certificateNameToPublicKeyName(certificateName);
-
-  var thisManager = this;
-  if (target instanceof Data) {
-    var data = target;
-    var digestAlgorithm = [0];
-
-    return this.makeSignatureByCertificatePromise
-      (certificateName, digestAlgorithm, useSync)
-    .then(function(signature) {
-      data.setSignature(signature);
-      // Encode once to get the signed portion.
-      var encoding = data.wireEncode(wireFormat);
-
-      return thisManager.privateKeyStorage.signPromise
-        (encoding.signedBuf(), keyName, digestAlgorithm[0], useSync);
-    })
-    .then(function(signatureValue) {
-      data.getSignature().setSignature(signatureValue);
-      // Encode again to include the signature.
-      data.wireEncode(wireFormat);
-
-      return SyncPromise.resolve(data);
-    });
-  }
-  else {
-    var digestAlgorithm = [0];
-    return this.makeSignatureByCertificatePromise
-      (certificateName, digestAlgorithm, useSync)
-    .then(function(signature) {
-      return thisManager.privateKeyStorage.signPromise
-        (target, keyName, digestAlgorithm[0], useSync);
-    })
-    .then(function (signatureValue) {
-      signature.setSignature(signatureValue);
-      return SyncPromise.resolve(signature);
-    });
-  }
-};
-
-/**
- * Sign the Data packet or byte array data based on the certificate name.
- * @param {Data|Buffer} target If this is a Data object, wire encode for signing,
- * update its signature and key locator field and wireEncoding. If it is a
- * Buffer, sign it to produce a Signature object.
- * @param {Name} certificateName The Name identifying the certificate which
- * identifies the signing key.
- * @param {WireFormat} (optional) The WireFormat for calling encodeData, or
- * WireFormat.getDefaultWireFormat() if omitted.
- * @param {function} onComplete (optional) If target is a Data object, this calls
- * onComplete(data) with the supplied Data object which has been modified to set
- * its signature. If target is a Buffer, this calls onComplete(signature) where
- * signature is the produced Signature object. If omitted, the return value is
- * described below. (Some crypto libraries only use a callback, so onComplete is
- * required to use these.)
- * @param {function} onError (optional) If defined, then onComplete must be
- * defined and if there is an exception, then this calls onError(exception)
- * with the exception. If onComplete is defined but onError is undefined, then
- * this will log any thrown exception. (Some crypto libraries only use a
- * callback, so onError is required to be notified of an exception.)
- * @return {Signature} If onComplete is omitted, return the generated Signature
- * object (if target is a Buffer) or the target (if target is Data). Otherwise,
- * if onComplete is supplied then return undefined and use onComplete as described
- * above.
- */
-IdentityManager.prototype.signByCertificate = function
-  (target, certificateName, wireFormat, onComplete, onError)
-{
-  onError = (typeof wireFormat === "function") ? onComplete : onError;
-  onComplete = (typeof wireFormat === "function") ? wireFormat : onComplete;
-  wireFormat = (typeof wireFormat === "function" || !wireFormat) ? WireFormat.getDefaultWireFormat() : wireFormat;
-
-  return SyncPromise.complete(onComplete, onError,
-    this.signByCertificatePromise
-      (target, certificateName, wireFormat, !onComplete));
-};
-
-/**
- * Append a SignatureInfo to the Interest name, sign the name components and
- * append a final name component with the signature bits.
- * @param {Interest} interest The Interest object to be signed. This appends
- * name components of SignatureInfo and the signature bits.
- * @param {Name} certificateName The certificate name of the key to use for
- * signing.
- * @param {WireFormat} wireFormat (optional) A WireFormat object used to encode
- * the input. If omitted, use WireFormat getDefaultWireFormat().
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise that returns the supplied Interest.
- */
-IdentityManager.prototype.signInterestByCertificatePromise = function
-  (interest, certificateName, wireFormat, useSync)
-{
-  useSync = (typeof wireFormat === "boolean") ? wireFormat : useSync;
-  wireFormat = (typeof wireFormat === "boolean" || !wireFormat) ? WireFormat.getDefaultWireFormat() : wireFormat;
-
-  var thisManager = this;
-  var signature;
-  var digestAlgorithm = [0];
-  return this.makeSignatureByCertificatePromise
-      (certificateName, digestAlgorithm, useSync)
-  .then(function(localSignature) {
-    signature = localSignature;
-    // Append the encoded SignatureInfo.
-    interest.getName().append(wireFormat.encodeSignatureInfo(signature));
-
-    // Append an empty signature so that the "signedPortion" is correct.
-    interest.getName().append(new Name.Component());
-    // Encode once to get the signed portion.
-    var encoding = interest.wireEncode(wireFormat);
-    var keyName = IdentityManager.certificateNameToPublicKeyName
-      (certificateName);
-
-    return thisManager.privateKeyStorage.signPromise
-      (encoding.signedBuf(), keyName, digestAlgorithm[0], useSync);
-  })
-  .then(function(signatureValue) {
-    signature.setSignature(signatureValue);
-
-    // Remove the empty signature and append the real one.
-    interest.setName(interest.getName().getPrefix(-1).append
-      (wireFormat.encodeSignatureValue(signature)));
-    return SyncPromise.resolve(interest);
-  });
-};
-
-/**
- * Append a SignatureInfo to the Interest name, sign the name components and
- * append a final name component with the signature bits.
- * @param {Interest} interest The Interest object to be signed. This appends
- * name components of SignatureInfo and the signature bits.
- * @param {Name} certificateName The certificate name of the key to use for
- * signing.
- * @param {WireFormat} wireFormat (optional) A WireFormat object used to encode
- * the input. If omitted, use WireFormat getDefaultWireFormat().
- * @param {function} onComplete (optional) This calls onComplete(interest) with
- * the supplied Interest object which has been modified to set its signature. If
- * omitted, then return when the interest has been signed. (Some crypto
- * libraries only use a callback, so onComplete is required to use these.)
- * @param {function} onError (optional) If defined, then onComplete must be
- * defined and if there is an exception, then this calls onError(exception)
- * with the exception. If onComplete is defined but onError is undefined, then
- * this will log any thrown exception. (Some crypto libraries only use a
- * callback, so onError is required to be notified of an exception.)
- * @return {Signature} If onComplete is omitted, return the interest. Otherwise,
- * if onComplete is supplied then return undefined and use onComplete as
- * described above.
- */
-IdentityManager.prototype.signInterestByCertificate = function
-  (interest, certificateName, wireFormat, onComplete, onError)
-{
-  onError = (typeof wireFormat === "function") ? onComplete : onError;
-  onComplete = (typeof wireFormat === "function") ? wireFormat : onComplete;
-  wireFormat = (typeof wireFormat === "function" || !wireFormat) ? WireFormat.getDefaultWireFormat() : wireFormat;
-
-  return SyncPromise.complete(onComplete, onError,
-    this.signInterestByCertificatePromise
-      (interest, certificateName, wireFormat, !onComplete));
-};
-
-/**
- * Wire encode the Data object, digest it and set its SignatureInfo to a
- * DigestSha256.
- * @param {Data} data The Data object to be signed. This updates its signature
- * and wireEncoding.
- * @param {WireFormat} (optional) The WireFormat for calling encodeData, or
- * WireFormat.getDefaultWireFormat() if omitted.
- */
-IdentityManager.prototype.signWithSha256 = function(data, wireFormat)
-{
-  wireFormat = (wireFormat || WireFormat.getDefaultWireFormat());
-
-  data.setSignature(new DigestSha256Signature());
-  // Encode once to get the signed portion.
-  var encoding = data.wireEncode(wireFormat);
-
-  // Digest and set the signature.
-  var hash = Crypto.createHash('sha256');
-  hash.update(encoding.signedBuf());
-  data.getSignature().setSignature(new Blob(hash.digest(), false));
-
-  // Encode again to include the signature.
-  data.wireEncode(wireFormat);
-};
-
-/**
- * Append a SignatureInfo for DigestSha256 to the Interest name, digest the
-   * name components and append a final name component with the signature bits
-   * (which is the digest).
- * @param {Interest} interest The Interest object to be signed. This appends
- * name components of SignatureInfo and the signature bits.
- * @param {WireFormat} wireFormat (optional) A WireFormat object used to encode
- * the input. If omitted, use WireFormat getDefaultWireFormat().
- */
-IdentityManager.prototype.signInterestWithSha256 = function(interest, wireFormat)
-{
-  wireFormat = (wireFormat || WireFormat.getDefaultWireFormat());
-
-  var signature = new DigestSha256Signature();
-
-  // Append the encoded SignatureInfo.
-  interest.getName().append(wireFormat.encodeSignatureInfo(signature));
-
-  // Append an empty signature so that the "signedPortion" is correct.
-  interest.getName().append(new Name.Component());
-  // Encode once to get the signed portion.
-  var encoding = interest.wireEncode(wireFormat);
-
-  // Digest and set the signature.
-  var hash = Crypto.createHash('sha256');
-  hash.update(encoding.signedBuf());
-  signature.setSignature(new Blob(hash.digest(), false));
-
-  // Remove the empty signature and append the real one.
-  interest.setName(interest.getName().getPrefix(-1).append
-    (wireFormat.encodeSignatureValue(signature)));
-};
-
-/**
- * Generate a self-signed certificate for a public key.
- * @param {Name} keyName The name of the public key.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If false, this may return a SyncPromise or an async
- * Promise.
- * @return {Promise|SyncPromise} A promise which returns the generated
- * IdentityCertificate.
- */
-IdentityManager.prototype.selfSignPromise = function(keyName, useSync)
-{
-  var certificate = new IdentityCertificate();
-
-  var thisManager = this;
-  return this.identityStorage.getKeyPromise(keyName, useSync)
-  .then(function(keyBlob) {
-    var publicKey = new PublicKey(keyBlob);
-
-    var notBefore = new Date().getTime();
-    var notAfter = notBefore + 2 * 365 * 24 * 3600 * 1000; // about 2 years
-
-    certificate.setNotBefore(notBefore);
-    certificate.setNotAfter(notAfter);
-
-    var certificateName = keyName.getPrefix(-1).append("KEY").append
-      (keyName.get(-1)).append("ID-CERT").appendVersion(certificate.getNotBefore());
-    certificate.setName(certificateName);
-
-    certificate.setPublicKeyInfo(publicKey);
-    certificate.addSubjectDescription(new CertificateSubjectDescription
-      ("2.5.4.41", keyName.toUri()));
-    certificate.encode();
-
-    return thisManager.signByCertificatePromise
-      (certificate, certificate.getName(), useSync);
-  })
-};
-
-/**
- * Generate a self-signed certificate for a public key.
- * @param {Name} keyName The name of the public key.
- * @param {function} onComplete (optional) This calls onComplete(certificate)
- * with the the generated IdentityCertificate. If omitted, the return value is
- * described below. (Some crypto libraries only use a callback, so onComplete is
- * required to use these.)
- * @return {IdentityCertificate} If onComplete is omitted, return the
- * generated certificate. Otherwise, if onComplete is supplied then return
- * undefined and use onComplete as described above.
- * @param {function} onError (optional) If defined, then onComplete must be
- * defined and if there is an exception, then this calls onError(exception)
- * with the exception. If onComplete is defined but onError is undefined, then
- * this will log any thrown exception. (Some crypto libraries only use a
- * callback, so onError is required to be notified of an exception.)
- */
-IdentityManager.prototype.selfSign = function(keyName, onComplete, onError)
-{
-  return SyncPromise.complete(onComplete, onError,
-    this.selfSignPromise(keyName, !onComplete));
-};
-
-/**
- * Get the public key name from the full certificate name.
- *
- * @param {Name} certificateName The full certificate name.
- * @return {Name} The related public key name.
- * TODO: Move this to IdentityCertificate
- */
-IdentityManager.certificateNameToPublicKeyName = function(certificateName)
-{
-  var i = certificateName.size() - 1;
-  var idString = "ID-CERT";
-  while (i >= 0) {
-    if (certificateName.get(i).toEscapedString() == idString)
-      break;
-    --i;
-  }
-
-  var tmpName = certificateName.getSubName(0, i);
-  var keyString = "KEY";
-  i = 0;
-  while (i < tmpName.size()) {
-    if (tmpName.get(i).toEscapedString() == keyString)
-      break;
-    ++i;
-  }
-
-  return tmpName.getSubName(0, i).append(tmpName.getSubName
-    (i + 1, tmpName.size() - i - 1));
-};
-
-/**
- * Return a new Signature object based on the signature algorithm of the public
- * key with keyName (derived from certificateName).
- * @param {Name} certificateName The certificate name.
- * @param {Array} digestAlgorithm Set digestAlgorithm[0] to the signature
- * algorithm's digest algorithm, e.g. DigestAlgorithm.SHA256.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If false, this may return a SyncPromise or an async
- * Promise.
- * @return {Promise|SyncPromise} A promise which returns a new object of the
- * correct subclass of Signature.
- */
-IdentityManager.prototype.makeSignatureByCertificatePromise = function
-  (certificateName, digestAlgorithm, useSync)
-{
-  var keyName = IdentityManager.certificateNameToPublicKeyName(certificateName);
-  return this.privateKeyStorage.getPublicKeyPromise(keyName, useSync)
-  .then(function(publicKey) {
-    var keyType = publicKey.getKeyType();
-
-    var signature = null;
-    if (keyType == KeyType.RSA) {
-      signature = new Sha256WithRsaSignature();
-      digestAlgorithm[0] = DigestAlgorithm.SHA256;
-
-      signature.getKeyLocator().setType(KeyLocatorType.KEYNAME);
-      signature.getKeyLocator().setKeyName(certificateName.getPrefix(-1));
-    }
-    else if (keyType == KeyType.EC) {
-      signature = new Sha256WithEcdsaSignature();
-      digestAlgorithm[0] = DigestAlgorithm.SHA256;
-
-      signature.getKeyLocator().setType(KeyLocatorType.KEYNAME);
-      signature.getKeyLocator().setKeyName(certificateName.getPrefix(-1));
-    }
-    else
-      throw new SecurityException(new Error("Key type is not recognized"));
-
-    return SyncPromise.resolve(signature);
-  });
-};
-
-/**
- * A private method to generate a pair of keys for the specified identity.
- * @param {Name} identityName The name of the identity.
- * @param {boolean} isKsk true for generating a Key-Signing-Key (KSK), false for
- * a Data-Signing-Key (DSK).
- * @param {KeyParams} params The parameters of the key.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If false, this may return a SyncPromise or an async
- * Promise.
- * @return {Promise|SyncPromise} A promise which returns the generated key name.
- */
-IdentityManager.prototype.generateKeyPairPromise = function
-  (identityName, isKsk, params, useSync)
-{
-  var keyName;
-  var thisManager = this;
-  return this.identityStorage.getNewKeyNamePromise(identityName, isKsk, useSync)
-  .then(function(localKeyName) {
-    keyName = localKeyName;
-    return thisManager.privateKeyStorage.generateKeyPairPromise
-      (keyName, params, useSync);
-  })
-  .then(function() {
-    return thisManager.privateKeyStorage.getPublicKeyPromise
-      (keyName, useSync);
-  })
-  .then(function(publicKey) {
-    return thisManager.identityStorage.addKeyPromise
-      (keyName, params.getKeyType(), publicKey.getKeyDer());
-  })
-  .then(function() {
-    return SyncPromise.resolve(keyName);
-  });
-};
-
-/**
- * Get the IdentityStorage from the pib value in the configuration file if
- * supplied. Otherwise, get the default for this platform.
- * @param {ConfigFile} config The configuration file to check.
- * @param {function} initialCheckPromise This is passed to the
- * BasicIdentityStorage constructor. See it for details.
- * @return {IdentityStorage} A new IdentityStorage.
- */
-IdentityManager.getDefaultIdentityStorage_ = function(config, initialCheckPromise)
-{
-  // Assume we are in Node.js.
-  var pibLocator = config.get("pib", "");
-
-  if (pibLocator !== "") {
-    // Don't support non-default locations for now.
-    if (pibLocator !== "pib-sqlite3")
-      throw new SecurityException(new Error
-        ("Invalid config file pib value: " + pibLocator));
-  }
-
-  return new BasicIdentityStorage(initialCheckPromise);
-};
-
-/**
- * Get the PrivateKeyStorage from the tpm value in the configuration file if
- * supplied. Otherwise, get the default for this platform.
- * @param {ConfigFile} config The configuration file to check.
- * @param {Array<string>} canonicalTpmLocator Set canonicalTpmLocator[0] to the
- * canonical value including the colon, * e.g. "tpm-file:".
- * @return A new PrivateKeyStorage.
- */
-IdentityManager.getDefaultPrivateKeyStorage_ = function
-  (config, canonicalTpmLocator)
-{
-  var tpmLocator = config.get("tpm", "");
-
-  if (tpmLocator === "") {
-    // Assume we are in Node.js, so check the system.
-    if (process.platform === "darwin") {
-      canonicalTpmLocator[0] = "tpm-osxkeychain:";
-      throw new SecurityException(new Error
-        ("IdentityManager: OS X key chain storage is not yet implemented. You must supply a privateKeyStorage."));
-    }
-    else {
-      canonicalTpmLocator[0] = "tpm-file:";
-      return new FilePrivateKeyStorage();
-    }
-  }
-  else if (tpmLocator === "tpm-osxkeychain") {
-    canonicalTpmLocator[0] = "tpm-osxkeychain:";
-    throw new SecurityException(new Error
-      ("IdentityManager: tpm-osxkeychain is not yet implemented."));
-  }
-  else if (tpmLocator === "tpm-file") {
-    canonicalTpmLocator[0] = "tpm-file:";
-    return new FilePrivateKeyStorage();
-  }
-  else
-    throw new SecurityException(new Error
-      ("Invalid config file tpm value: " + tpmLocator));
-};
-
-/**
- * Check that identityStorage.getTpmLocatorPromise() (if defined) matches the
- * canonicalTpmLocator. This has to be an async Promise because it calls async
- * getTpmLocatorPromise.
- * @param canonicalTpmLocator The canonical locator from
- * getDefaultPrivateKeyStorage().
- * @return {Promise} A promise which resolves if canonicalTpmLocator is OK, or a
- * promise rejected with SecurityException if the private key storage does not
- * match.
- */
-IdentityManager.prototype.checkTpmPromise_ = function(canonicalTpmLocator)
-{
-  return this.identityStorage.getTpmLocatorPromise()
-  .then(function(tpmLocator) {
-    // Just check. If a PIB reset is required, expect ndn-cxx/NFD to do it.
-    if (tpmLocator !== "" && tpmLocator !== canonicalTpmLocator)
-      return Promise.reject(new SecurityException(new Error
-        ("The TPM locator supplied does not match the TPM locator in the PIB: " +
-         tpmLocator + " != " + canonicalTpmLocator)));
-    else
-      return Promise.resolve();
-  }, function(err) {
-    // The TPM locator is not set in the PIB yet.
-    return Promise.resolve();
-  });
-};
-/**
  * Copyright (C) 2017-2019 Regents of the University of California.
  * @author: Jeff Thompson <jefft0@remap.ucla.edu>
  * @author: From ndn-cxx security https://github.com/named-data/ndn-cxx/blob/master/ndn-cxx/security/pib/certificate-container.cpp
@@ -28501,6 +24014,37 @@ PibImpl.prototype.addCertificatePromise = function(certificate, useSync)
 {
   return SyncPromise.reject(new Error
     ("PibImpl.addCertificatePromise is not implemented"));
+};
+
+/**
+ * Add the certificate. If a certificate with the same name (without implicit
+ * digest) already exists, then overwrite the certificate. If the key or
+ * identity does not exist, they will be created. If no default certificate for
+ * the key has been set, then set the added certificate as the default for the
+ * key. If no default key was set for the identity, it will be set as the
+ * default key for the identity. If no default identity was selected, the
+ * certificate's identity becomes the default.
+ * @param {CertificateV2} certificate The certificate to add. This copies the
+ * object.
+ * @param {function} onComplete (optional) This calls onComplete() when the
+ * operation is complete. If omitted, do not use it. (Some database libraries
+ * only use a callback, so onComplete is required to use these.)
+ * NOTE: The library will log any exceptions thrown by this callback, but for
+ * better error handling the callback should catch and properly handle any
+ * exceptions.
+ * @param {function} onError (optional) If defined, then onComplete must be
+ * defined and if there is an exception, then this calls onError(exception)
+ * with the exception. If onComplete is defined but onError is undefined, then
+ * this will log any thrown exception. (Some database libraries only use a
+ * callback, so onError is required to be notified of an exception.)
+ * NOTE: The library will log any exceptions thrown by this callback, but for
+ * better error handling the callback should catch and properly handle any
+ * exceptions.
+ */
+PibImpl.prototype.addCertificate = function(certificate, onComplete, onError)
+{
+  return SyncPromise.complete(onComplete, onError,
+    this.addCertificatePromise(certificate, !onComplete));
 };
 
 /**
@@ -31447,1969 +26991,6 @@ PibKeyImpl.prototype.getDefaultCertificatePromise = function(useSync)
     return SyncPromise.resolve(thisImpl.defaultCertificate_);
 };
 /**
- * Copyright (C) 2014-2019 Regents of the University of California.
- * @author: Jeff Thompson <jefft0@remap.ucla.edu>
- * From ndn-cxx security by Yingdi Yu <yingdi@cs.ucla.edu>.
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU Lesser General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU Lesser General Public License for more details.
- *
- * You should have received a copy of the GNU Lesser General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
- * A copy of the GNU Lesser General Public License is in the file COPYING.
- */
-
-/**
- * A ValidationRequest is used to return information from
- * PolicyManager.checkVerificationPolicy.
- *
- * Create a new ValidationRequest with the given values.
- * @param {Interest} interest An interest for fetching more data.
- * @param {function} onVerified If the signature is verified, this calls
- * onVerified(data).
- * @param {function} onValidationFailed If the signature check fails, this calls
- * onValidationFailed(data, reason).
- * @param {number} retry The number of retrials when there is an interest timeout.
- * @param {number} stepCount  The number of verification steps that have been
- * done, used to track the verification progress.
- * @constructor
- */
-var ValidationRequest = function ValidationRequest
-  (interest, onVerified, onValidationFailed, retry, stepCount)
-{
-  this.interest = interest;
-  this.onVerified = onVerified;
-  this.onValidationFailed = onValidationFailed;
-  this.retry = retry;
-  this.stepCount = stepCount;
-};
-
-exports.ValidationRequest = ValidationRequest;
-/**
- * Copyright (C) 2014-2019 Regents of the University of California.
- * @author: Jeff Thompson <jefft0@remap.ucla.edu>
- * From ndn-cxx security by Yingdi Yu <yingdi@cs.ucla.edu>.
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU Lesser General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU Lesser General Public License for more details.
- *
- * You should have received a copy of the GNU Lesser General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
- * A copy of the GNU Lesser General Public License is in the file COPYING.
- */
-
-// Use capitalized Crypto to not clash with the browser's crypto.subtle.
-/** @ignore */
-var Crypto = require('../../crypto.js'); /** @ignore */
-var Blob = require('../../util/blob.js').Blob; /** @ignore */
-var DataUtils = require('../../encoding/data-utils.js').DataUtils; /** @ignore */
-var SecurityException = require('../security-exception.js').SecurityException; /** @ignore */
-var DigestSha256Signature = require('../../digest-sha256-signature.js').DigestSha256Signature; /** @ignore */
-var Sha256WithRsaSignature = require('../../sha256-with-rsa-signature.js').Sha256WithRsaSignature; /** @ignore */
-var Sha256WithEcdsaSignature = require('../../sha256-with-ecdsa-signature.js').Sha256WithEcdsaSignature; /** @ignore */
-var VerificationHelpers = require('../verification-helpers.js').VerificationHelpers; /** @ignore */
-var DigestAlgorithm = require('../security-types.js').DigestAlgorithm; /** @ignore */
-var PublicKey = require('../certificate/public-key.js').PublicKey; /** @ignore */
-var SyncPromise = require("../../util/sync-promise").SyncPromise;
-
-/**
- * A PolicyManager is an abstract base class to represent the policy for
- * verifying data packets. You must create an object of a subclass.
- * @constructor
- */
-var PolicyManager = function PolicyManager()
-{
-};
-
-exports.PolicyManager = PolicyManager;
-
-/**
- * Check if the received data packet or signed interest can escape from
- * verification and be trusted as valid.
- * Your derived class should override.
- *
- * @param {Data|Interest} dataOrInterest The received data packet or interest.
- * @return {boolean} True if the data or interest does not need to be verified
- * to be trusted as valid, otherwise false.
- */
-PolicyManager.prototype.skipVerifyAndTrust = function(dataOrInterest)
-{
-  throw new Error("PolicyManager.skipVerifyAndTrust is not implemented");
-};
-
-/**
- * Check if this PolicyManager has a verification rule for the received data
- * packet or signed interest.
- * Your derived class should override.
- *
- * @param {Data|Interest} dataOrInterest The received data packet or interest.
- * @return {boolean} True if the data or interest must be verified, otherwise
- * false.
- */
-PolicyManager.prototype.requireVerify = function(dataOrInterest)
-{
-  throw new Error("PolicyManager.requireVerify is not implemented");
-};
-
-/**
- * Check whether the received data or interest packet complies with the
- * verification policy, and get the indication of the next verification step.
- * Your derived class should override.
- *
- * @param {Data|Interest} dataOrInterest The Data object or interest with the
- * signature to check.
- * @param {number} stepCount The number of verification steps that have been
- * done, used to track the verification progress.
- * @param {function} onVerified If the signature is verified, this calls
- * onVerified(dataOrInterest).
- * NOTE: The library will log any exceptions thrown by this callback, but for
- * better error handling the callback should catch and properly handle any
- * exceptions.
- * @param {function} onValidationFailed If the signature check fails, this calls
- * onValidationFailed(dataOrInterest, reason).
- * NOTE: The library will log any exceptions thrown by this callback, but for
- * better error handling the callback should catch and properly handle any
- * exceptions.
- * @param {WireFormat} wireFormat
- * @return {ValidationRequest} The indication of next verification step, or
- * null if there is no further step.
- */
-PolicyManager.prototype.checkVerificationPolicy = function
-  (dataOrInterest, stepCount, onVerified, onValidationFailed, wireFormat)
-{
-  throw new Error("PolicyManager.checkVerificationPolicy is not implemented");
-};
-
-/**
- * Check if the signing certificate name and data name satisfy the signing
- * policy.
- * Your derived class should override.
- *
- * @param {Name} dataName The name of data to be signed.
- * @param {Name} certificateName The name of signing certificate.
- * @return {boolean} True if the signing certificate can be used to sign the
- * data, otherwise false.
- */
-PolicyManager.prototype.checkSigningPolicy = function(dataName, certificateName)
-{
-  throw new Error("PolicyManager.checkSigningPolicy is not implemented");
-};
-
-/**
- * Infer the signing identity name according to the policy. If the signing
- * identity cannot be inferred, return an empty name.
- * Your derived class should override.
- *
- * @param {Name} dataName The name of data to be signed.
- * @return {Name} The signing identity or an empty name if cannot infer.
- */
-PolicyManager.prototype.inferSigningIdentity = function(dataName)
-{
-  throw new Error("PolicyManager.inferSigningIdentity is not implemented");
-};
-
-// The first time verify is called, it sets this to determine if a signature
-// buffer needs to be converted to a string for the crypto verifier.
-PolicyManager.verifyUsesString_ = null;
-PolicyManager.setVerifyUsesString_ = function()
-{
-  var hashResult = Crypto.createHash('sha256').digest();
-  // If the hash result is a string, we assume that this is a version of
-  //   crypto where verify also uses a string signature.
-  PolicyManager.verifyUsesString_ = (typeof hashResult === 'string');
-};
-
-/**
- * Check the type of signature and use the publicKeyDer to verify the
- * signedBlob using the appropriate signature algorithm.
- * @param {Signature} signature An object of a subclass of Signature, e.g.
- * Sha256WithRsaSignature.
- * @param {SignedBlob} signedBlob the SignedBlob with the signed portion to
- * verify.
- * @param {Blob} publicKeyDer The DER-encoded public key used to verify the
- * signature.
- * @param {function} onComplete This calls onComplete(true) if the signature
- * verifies, otherwise onComplete(false).
- * @throws SecurityException if the signature type is not recognized or if
- * publicKeyDer can't be decoded.
- */
-PolicyManager.verifySignature = function
-  (signature, signedBlob, publicKeyDer, onComplete)
-{
-  if (signature instanceof Sha256WithRsaSignature ||
-      signature instanceof Sha256WithEcdsaSignature) {
-    if (publicKeyDer.isNull()) {
-      onComplete(false);
-      return;
-    }
-
-    var publicKey;
-    try {
-      publicKey = new PublicKey(publicKeyDer);
-    } catch (ex) {
-      throw new SecurityException(new Error
-        ("PolicyManager.verify: Error decoding public key: " + ex));
-    }
-
-    SyncPromise.complete(onComplete,
-      VerificationHelpers.verifySignaturePromise
-        (signedBlob.signedBuf(), signature.getSignature(), publicKey,
-         DigestAlgorithm.SHA256, !onComplete));
-  }
-  else if (signature instanceof DigestSha256Signature)
-    onComplete(VerificationHelpers.verifyDigest
-      (signedBlob.signedBuf(), signature.getSignature(),
-       DigestAlgorithm.SHA256));
-  else
-    // We don't expect this to happen.
-    throw new SecurityException(new Error
-      ("PolicyManager.verify: Signature type is unknown"));
-};
-/**
- * Copyright (C) 2014-2019 Regents of the University of California.
- * @author: Jeff Thompson <jefft0@remap.ucla.edu>
- * From PyNDN certificate_cache.py by Adeola Bannis.
- * Originally from Yingdi Yu <http://irl.cs.ucla.edu/~yingdi/>.
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU Lesser General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU Lesser General Public License for more details.
- *
- * You should have received a copy of the GNU Lesser General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
- * A copy of the GNU Lesser General Public License is in the file COPYING.
- */
-
-/** @ignore */
-var IdentityCertificate = require('../certificate/identity-certificate.js').IdentityCertificate;
-
-/**
- * A CertificateCache is used to save other users' certificate during
- * verification.
- * @constructor
- */
-var CertificateCache = function CertificateCache()
-{
-  // The key is the certificate name URI. The value is the wire encoding Blob.
-  this.cache = {};
-};
-
-exports.CertificateCache = CertificateCache;
-
-/**
- * Insert the certificate into the cache. Assumes the timestamp is not yet
- * removed from the name.
- * @param {IdentityCertificate} certificate The certificate to insert.
- */
-CertificateCache.prototype.insertCertificate = function(certificate)
-{
-  var certName = certificate.getName().getPrefix(-1);
-  this.cache[certName.toUri()] = certificate.wireEncode();
-};
-
-/**
- * Remove a certificate from the cache. This does nothing if it is not present.
- * @param {Name} certificateName The name of the certificate to remove. This
- * assumes there is no timestamp in the name.
- */
-CertificateCache.prototype.deleteCertificate = function(certificateName)
-{
-  delete this.cache[certificateName.toUri()];
-};
-
-/**
- * Fetch a certificate from the cache.
- * @param {Name} certificateName The name of the certificate to remove. This
- * assumes there is no timestamp in the name.
- * @return {IdentityCertificate} A new copy of the IdentityCertificate, or null
- * if not found.
- */
-CertificateCache.prototype.getCertificate = function(certificateName)
-{
-  var certData = this.cache[certificateName.toUri()];
-  if (certData === undefined)
-    return null;
-
-  var cert = new IdentityCertificate();
-  cert.wireDecode(certData);
-  return cert;
-};
-
-/**
- * Clear all certificates from the store.
- */
-CertificateCache.prototype.reset = function()
-{
-  this.cache = {};
-};
-/**
- * Copyright (C) 2014-2019 Regents of the University of California.
- * @author: Jeff Thompson <jefft0@remap.ucla.edu>
- * From PyNDN config_policy_manager.py by Adeola Bannis.
- * Originally from Yingdi Yu <http://irl.cs.ucla.edu/~yingdi/>.
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU Lesser General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU Lesser General Public License for more details.
- *
- * You should have received a copy of the GNU Lesser General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
- * A copy of the GNU Lesser General Public License is in the file COPYING.
- */
-
-/** @ignore */
-var fs = require('fs'); /** @ignore */
-var path = require('path'); /** @ignore */
-var Name = require('../../name.js').Name; /** @ignore */
-var Data = require('../../data.js').Data; /** @ignore */
-var Interest = require('../../interest.js').Interest; /** @ignore */
-var KeyLocator = require('../../key-locator.js').KeyLocator; /** @ignore */
-var KeyLocatorType = require('../../key-locator.js').KeyLocatorType; /** @ignore */
-var Blob = require('../../util/blob.js').Blob; /** @ignore */
-var IdentityCertificate = require('../certificate/identity-certificate.js').IdentityCertificate; /** @ignore */
-var CertificateV2 = require('../v2/certificate-v2.js').CertificateV2; /** @ignore */
-var CertificateCacheV2 = require('../v2/certificate-cache-v2.js').CertificateCacheV2; /** @ignore */
-var BoostInfoParser = require('../../util/boost-info-parser.js').BoostInfoParser; /** @ignore */
-var NdnRegexTopMatcher = require('../../util/regex/ndn-regex-top-matcher.js').NdnRegexTopMatcher; /** @ignore */
-var CertificateCache = require('./certificate-cache.js').CertificateCache; /** @ignore */
-var ValidationRequest = require('./validation-request.js').ValidationRequest; /** @ignore */
-var SecurityException = require('../security-exception.js').SecurityException; /** @ignore */
-var WireFormat = require('../../encoding/wire-format.js').WireFormat; /** @ignore */
-var PolicyManager = require('./policy-manager.js').PolicyManager; /** @ignore */
-var NdnCommon = require('../../util/ndn-common.js').NdnCommon;
-
-/**
- * ConfigPolicyManager manages trust according to a configuration file in the
- * Validator Configuration File Format
- * (http://redmine.named-data.net/projects/ndn-cxx/wiki/CommandValidatorConf)
- *
- * Once a rule is matched, the ConfigPolicyManager looks in the
- * certificate cache for the certificate matching the name in the KeyLocator
- * and uses its public key to verify the data packet or signed interest. If the
- * certificate can't be found, it is downloaded, verified and installed. A chain
- * of certificates will be followed to a maximum depth.
- * If the new certificate is accepted, it is used to complete the verification.
- *
- * The KeyLocators of data packets and signed interests MUST contain a name for
- * verification to succeed.
- *
- * Create a new ConfigPolicyManager which will act on the rules specified in the
- * configuration and download unknown certificates when necessary. If
- * certificateCache is a CertificateCache (or omitted) this creates a security
- * v1 PolicyManager to verify certificates in format v1. To verify certificates
- * in format v2, use a CertificateCacheV2 for the certificateCache.
- *
- * @param {string} configFileName (optional) If not null or empty, the path to
- * the configuration file containing verification rules. (This only works in
- * Node.js since it reads files using the "fs" module.) Otherwise, you should
- * separately call load().
- * @param {CertificateCache|CertificateCacheV2} certificateCache (optional) A
- * CertificateCache to hold known certificates. If certificateCache is a
- * CertificateCache (or omitted or null) this creates a security v1
- * PolicyManager to verify certificates in format v1. If this is a
- * CertificateCacheV2, verify certificates in format v1. If omitted or null,
- * create an internal v1 CertificateCache.
- * @param {number} searchDepth (optional) The maximum number of links to follow
- * when verifying a certificate chain. If omitted, use a default.
- * @param {number} graceInterval (optional) The window of time difference
- * (in milliseconds) allowed between the timestamp of the first interest signed with
- * a new public key and the validation time. If omitted, use a default value.
- * @param {number} keyTimestampTtl (optional) How long a public key's last-used
- * timestamp is kept in the store (milliseconds). If omitted, use a default value.
- * @param {number} maxTrackedKeys The maximum number of public key use
- * timestamps to track. If omitted, use a default.
- * @constructor
- */
-var ConfigPolicyManager = function ConfigPolicyManager
-  (configFileName, certificateCache, searchDepth, graceInterval,
-   keyTimestampTtl, maxTrackedKeys)
-{
-  // Call the base constructor.
-  PolicyManager.call(this);
-
-  if (certificateCache == undefined)
-    certificateCache = null;
-  if (searchDepth == undefined)
-    searchDepth = 5;
-  if (graceInterval == undefined)
-    graceInterval = 3000;
-  if (keyTimestampTtl == undefined)
-    keyTimestampTtl = 3600000;
-  if (maxTrackedKeys == undefined)
-    maxTrackedKeys = 1000;
-
-  if (certificateCache == null)
-    certificateCache = new CertificateCache();
-  if (certificateCache instanceof CertificateCache) {
-    this.isSecurityV1_ = true;
-    this.certificateCache_ = certificateCache;
-    this.certificateCacheV2_ = null;
-  }
-  else {
-    this.isSecurityV1_ = false;
-    this.certificateCache_ = null;
-    this.certificateCacheV2_ = certificateCache;
-  }
-
-  this.maxDepth = searchDepth;
-  this.keyGraceInterval = graceInterval;
-  this.keyTimestampTtl = keyTimestampTtl;
-  this.maxTrackedKeys = maxTrackedKeys;
-
-  this.reset();
-
-  if (configFileName != null && configFileName != "")
-    this.load(configFileName);
-};
-
-ConfigPolicyManager.prototype = new PolicyManager();
-ConfigPolicyManager.prototype.name = "ConfigPolicyManager";
-
-exports.ConfigPolicyManager = ConfigPolicyManager;
-
-/**
- * Reset the certificate cache and other fields to the constructor state.
- */
-ConfigPolicyManager.prototype.reset = function()
-{
-  if (this.isSecurityV1_)
-    this.certificateCache_.reset();
-  else
-    this.certificateCacheV2_.clear();
-
-  // Stores the fixed-signer certificate name associated with validation rules
-  // so we don't keep loading from files.
-  this.fixedCertificateCache = {};
-
-  // Stores the timestamps for each public key used in command interests to
-  // avoid replay attacks.
-  // Key is public key name, value is last timestamp.
-  this.keyTimestamps = {};
-
-  this.requiresVerification = true;
-
-  this.config = new BoostInfoParser();
-  this.refreshManager = new ConfigPolicyManager.TrustAnchorRefreshManager
-    (this.isSecurityV1_);
-};
-
-/**
- * Call reset() and load the configuration rules from the file name or the input
- * string. There are two forms:
- * load(configFileName) reads configFileName from the file system. (This only
- * works in Node.js since it reads files using the "fs" module.)
- * load(input, inputName) reads from the input, in which case inputName is used
- * only for log messages, etc.
- * @param {string} configFileName The path to the file containing configuration
- * rules.
- * @param {string} input The contents of the configuration rules, with lines
- * separated by "\n" or "\r\n".
- * @param {string} inputName Use with input for log messages, etc.
- */
-ConfigPolicyManager.prototype.load = function(configFileNameOrInput, inputName)
-{
-  this.reset();
-  this.config.read(configFileNameOrInput, inputName);
-  this.loadTrustAnchorCertificates();
-}
-
-/**
- * Check if this PolicyManager has a verification rule for the received data.
- * If the configuration file contains the trust anchor 'any', nothing is
- * verified.
- *
- * @param {Data|Interest} dataOrInterest The received data packet or interest.
- * @return {boolean} true if the data must be verified, otherwise false.
- */
-ConfigPolicyManager.prototype.requireVerify = function(dataOrInterest)
-{
-  return this.requiresVerification;
-};
-
-/**
- * Override to always indicate that the signing certificate name and data name
- * satisfy the signing policy.
- *
- * @param {Name} dataName The name of data to be signed.
- * @param {Name} certificateName The name of signing certificate.
- * @return {boolean} True to indicate that the signing certificate can be used
- * to sign the data.
- */
-ConfigPolicyManager.prototype.checkSigningPolicy = function
-  (dataName, certificateName)
-{
-  return true;
-};
-
-/**
- * Check if the received signed interest can escape from verification and be
- * trusted as valid. If the configuration file contains the trust anchor
- * 'any', nothing is verified.
- *
- * @param {Data|Interest} dataOrInterest The received data packet or interest.
- * @return {boolean} true if the data or interest does not need to be verified
- * to be trusted as valid, otherwise false.
- */
-ConfigPolicyManager.prototype.skipVerifyAndTrust = function(dataOrInterest)
-{
-  return !this.requiresVerification;
-};
-
-/**
- * Check whether the received data packet or interest complies with the
- * verification policy, and get the indication of the next verification step.
- *
- * @param {Data|Interest} dataOrInterest The Data object or interest with the
- * signature to check.
- * @param {number} stepCount The number of verification steps that have been
- * done, used to track the verification progress.
- * @param {function} onVerified If the signature is verified, this calls
- * onVerified(dataOrInterest).
- * NOTE: The library will log any exceptions thrown by this callback, but for
- * better error handling the callback should catch and properly handle any
- * exceptions.
- * @param {function} onValidationFailed If the signature check fails, this calls
- * onValidationFailed(dataOrInterest, reason).
- * NOTE: The library will log any exceptions thrown by this callback, but for
- * better error handling the callback should catch and properly handle any
- * exceptions.
- * @param {WireFormat} wireFormat
- * @return {ValidationRequest} The indication of next verification step, or
- * null if there is no further step.
- */
-ConfigPolicyManager.prototype.checkVerificationPolicy = function
-  (dataOrInterest, stepCount, onVerified, onValidationFailed, wireFormat)
-{
-  var objectName = dataOrInterest.getName();
-  var matchType = "data";
-
-  // For command interests, we need to ignore the last 4 components when
-  // matching the name.
-  if (dataOrInterest instanceof Interest) {
-    objectName = objectName.getPrefix(-4);
-    matchType = "interest";
-  }
-
-  var signature = ConfigPolicyManager.extractSignature(dataOrInterest, wireFormat);
-  // No signature -> fail.
-  if (signature == null) {
-    try {
-      onValidationFailed
-        (dataOrInterest, "Cannot extract the signature from " +
-         dataOrInterest.getName().toUri());
-    } catch (ex) {
-      console.log("Error in onValidationFailed: " + NdnCommon.getErrorWithStackTrace(ex));
-    }
-    return null;
-  }
-
-  var failureReason = ["unknown"];
-  var certificateInterest = this.getCertificateInterest_
-    (stepCount, matchType, objectName, signature, failureReason);
-  if (certificateInterest == null) {
-    try {
-      onValidationFailed(dataOrInterest, failureReason[0]);
-    } catch (ex) {
-      console.log("Error in onValidationFailed: " + NdnCommon.getErrorWithStackTrace(ex));
-    }
-    return null;
-  }
-
-  if (certificateInterest.getName().size() > 0) {
-    var thisManager = this;
-
-    var onCertificateDownloadComplete = function(data) {
-      var certificate;
-      if (thisManager.isSecurityV1_) {
-        try {
-          certificate = new IdentityCertificate(data);
-        } catch (ex) {
-          try {
-            onValidationFailed
-              (dataOrInterest, "Cannot decode certificate " + data.getName().toUri());
-          } catch (ex) {
-            console.log("Error in onValidationFailed: " + NdnCommon.getErrorWithStackTrace(ex));
-          }
-          return null;
-        }
-        thisManager.certificateCache_.insertCertificate(certificate);
-      }
-      else {
-        try {
-          certificate = new CertificateV2(data);
-        } catch (ex) {
-          try {
-            onValidationFailed
-              (dataOrInterest, "Cannot decode certificate " + data.getName().toUri());
-          } catch (ex) {
-            console.log("Error in onValidationFailed: " + NdnCommon.getErrorWithStackTrace(ex));
-          }
-          return null;
-        }
-        thisManager.certificateCacheV2_.insert(certificate);
-      }
-
-      thisManager.checkVerificationPolicy
-        (dataOrInterest, stepCount + 1, onVerified, onValidationFailed);
-    };
-
-    return new ValidationRequest
-      (certificateInterest, onCertificateDownloadComplete, onValidationFailed,
-       2, stepCount + 1);
-  }
-
-  // For interests, we must check that the timestamp is fresh enough.
-  // We do this after (possibly) downloading the certificate to avoid
-  // filling the cache with bad keys.
-  if (dataOrInterest instanceof Interest) {
-    var signatureName = KeyLocator.getFromSignature(signature).getKeyName();
-    var keyName;
-    if (this.isSecurityV1_)
-      keyName = IdentityCertificate.certificateNameToPublicKeyName
-        (signatureName);
-    else
-      keyName = signatureName;
-    var timestamp = dataOrInterest.getName().get(-4).toNumber();
-
-    if (!this.interestTimestampIsFresh(keyName, timestamp, failureReason)) {
-      try {
-        onValidationFailed(dataOrInterest, failureReason[0]);
-      } catch (ex) {
-        console.log("Error in onValidationFailed: " + NdnCommon.getErrorWithStackTrace(ex));
-      }
-      return null;
-    }
-  }
-
-  // Certificate is known, so verify the signature.
-  // wireEncode returns the cached encoding if available.
-  var thisManager = this;
-  this.verify(signature, dataOrInterest.wireEncode(), function (verified, reason) {
-    if (verified) {
-      try {
-        onVerified(dataOrInterest);
-      } catch (ex) {
-        console.log("Error in onVerified: " + NdnCommon.getErrorWithStackTrace(ex));
-      }
-      if (dataOrInterest instanceof Interest)
-        thisManager.updateTimestampForKey(keyName, timestamp);
-    }
-    else {
-      try {
-        onValidationFailed(dataOrInterest, reason);
-      } catch (ex) {
-        console.log("Error in onValidationFailed: " + NdnCommon.getErrorWithStackTrace(ex));
-      }
-    }
-  });
-};
-
-/**
- * This is a helper for checkVerificationPolicy to verify the rule and return a
- * certificate interest to fetch the next certificate in the hierarchy if needed.
- * @param {number} stepCount The number of verification steps that have been
- * done, used to track the verification progress.
- * @param {string} matchType Either "data" or "interest".
- * @param {Name} objectName The name of the data or interest packet.
- * @param {Signature} signature The Signature object for the data or interest
- * packet.
- * @param {Array<string>} failureReason If can't determine the interest, set
- * failureReason[0] to the failure reason.
- * @return {Interest} null if can't determine the interest, otherwise the
- * interest for the ValidationRequest to fetch the next certificate. However, if
- * the interest has an empty name, the validation succeeded and no need to fetch
- * a certificate.
- */
-ConfigPolicyManager.prototype.getCertificateInterest_ = function
-  (stepCount, matchType, objectName, signature, failureReason)
-{
-  if (stepCount > this.maxDepth) {
-    failureReason[0] = "The verification stepCount " + stepCount +
-      " exceeded the maxDepth " + this.maxDepth;
-    return null;
-  }
-
-  // First see if we can find a rule to match this packet.
-  var matchedRule;
-  try {
-    matchedRule = this.findMatchingRule(objectName, matchType);
-  } catch (ex) {
-    return null;
-  }
-
-  // No matching rule -> fail.
-  if (matchedRule == null) {
-    failureReason[0] = "No matching rule found for " + objectName.toUri();
-    return null;
-  }
-
-  if (!KeyLocator.canGetFromSignature(signature)) {
-    // We only support signature types with key locators.
-    failureReason[0] = "The signature type does not support a KeyLocator";
-    return null;
-  }
-
-  var keyLocator = keyLocator = KeyLocator.getFromSignature(signature);
-
-  var signatureName = keyLocator.getKeyName();
-  // No key name in KeyLocator -> fail.
-  if (signatureName.size() == 0) {
-    failureReason[0] = "The signature KeyLocator doesn't have a key name";
-    return null;
-  }
-
-  var signatureMatches = this.checkSignatureMatch
-    (signatureName, objectName, matchedRule, failureReason);
-  if (!signatureMatches)
-    return null;
-
-  // Before we look up keys, refresh any certificate directories.
-  this.refreshManager.refreshAnchors();
-
-  // If we don't actually have the certificate yet, return a certificateInterest
-  // for it.
-  if (this.isSecurityV1_) {
-    var foundCert = this.refreshManager.getCertificate(signatureName);
-    if (foundCert == null)
-      foundCert = this.certificateCache_.getCertificate(signatureName);
-    if (foundCert == null)
-      return new Interest(signatureName);
-  }
-  else {
-    var foundCert = this.refreshManager.getCertificateV2(signatureName);
-    if (foundCert == null)
-      foundCert = this.certificateCacheV2_.find(signatureName);
-    if (foundCert == null)
-      return new Interest(signatureName);
-  }
-
-  return new Interest();
-};
-
-/**
- * The configuration file allows 'trust anchor' certificates to be preloaded.
- * The certificates may also be loaded from a directory, and if the 'refresh'
- * option is set to an interval, the certificates are reloaded at the specified
- * interval.
- */
-ConfigPolicyManager.prototype.loadTrustAnchorCertificates = function()
-{
-  var anchors = this.config.getRoot().get("validator/trust-anchor");
-
-  for (var i = 0; i < anchors.length; ++i) {
-    var anchor = anchors[i];
-
-    var typeName = anchor.get("type")[0].getValue();
-    var isPath = false;
-    var certID;
-    if (typeName == 'file') {
-      certID = anchor.get("file-name")[0].getValue();
-      isPath = true;
-    }
-    else if (typeName == 'base64') {
-      certID = anchor.get("base64-string")[0].getValue();
-      isPath = false;
-    }
-    else if (typeName == "dir") {
-      var dirName = anchor.get("dir")[0].getValue();
-
-      var refreshPeriod = 0;
-      var refreshTrees = anchor.get("refresh");
-      if (refreshTrees.length >= 1) {
-        var refreshPeriodStr = refreshTrees[0].getValue();
-
-        var refreshMatch = refreshPeriodStr.match(/(\d+)([hms])/);
-        if (refreshMatch == null)
-          refreshPeriod = 0;
-        else {
-          refreshPeriod = parseInt(refreshMatch[1]);
-          if (refreshMatch[2] != 's') {
-            refreshPeriod *= 60;
-            if (refreshMatch[2] != 'm')
-              refreshPeriod *= 60;
-          }
-        }
-      }
-
-      // Convert refreshPeriod from seconds to milliseconds.
-      this.refreshManager.addDirectory(dirName, refreshPeriod * 1000);
-      continue;
-    }
-    else if (typeName == "any") {
-      // This disables all security!
-      this.requiresVerification = false;
-      break;
-    }
-
-    if (this.isSecurityV1_)
-      this.lookupCertificate(certID, isPath);
-    else
-      this.lookupCertificateV2(certID, isPath);
-  }
-};
-
-/**
- * Once a rule is found to match data or a signed interest, the name in the
- * KeyLocator must satisfy the condition in the 'checker' section of the rule,
- * else the data or interest is rejected.
- * @param {Name} signatureName The certificate name from the KeyLocator.
- * @param {Name} objectName The name of the data packet or interest. In the case
- * of signed interests, this excludes the timestamp, nonce and signature
- * components.
- * @param {BoostInfoTree} rule The rule from the configuration file that matches
- * the data or interest.
- * @param {Array<string>} failureReason If matching fails, set failureReason[0]
- * to the failure reason.
- * @return {boolean} True if matches.
- */
-ConfigPolicyManager.prototype.checkSignatureMatch = function
-  (signatureName, objectName, rule, failureReason)
-{
-  var checker = rule.get("checker")[0];
-  var checkerType = checker.get("type")[0].getValue();
-  if (checkerType == "fixed-signer") {
-    var signerInfo = checker.get("signer")[0];
-    var signerType = signerInfo.get("type")[0].getValue();
-
-    var cert;
-    if (signerType == "file") {
-      if (this.isSecurityV1_)
-        cert = this.lookupCertificate
-          (signerInfo.get("file-name")[0].getValue(), true);
-      else
-        cert = this.lookupCertificateV2
-          (signerInfo.get("file-name")[0].getValue(), true);
-      if (cert == null) {
-        failureReason[0] = "Can't find fixed-signer certificate file: " +
-          signerInfo.get("file-name")[0].getValue();
-        return false;
-      }
-    }
-    else if (signerType == "base64") {
-      if (this.isSecurityV1_)
-        cert = this.lookupCertificate
-          (signerInfo.get("base64-string")[0].getValue(), false);
-      else
-        cert = this.lookupCertificateV2
-          (signerInfo.get("base64-string")[0].getValue(), false);
-      if (cert == null) {
-        failureReason[0] = "Can't find fixed-signer certificate base64: " +
-          signerInfo.get("base64-string")[0].getValue();
-        return false;
-      }
-    }
-    else {
-      failureReason[0] = "Unrecognized fixed-signer signerType: " + signerType;
-      return false;
-    }
-
-    if (cert.getName().equals(signatureName))
-      return true;
-    else {
-      failureReason[0] = "fixed-signer cert name \"" + cert.getName().toUri() +
-        "\" does not equal signatureName \"" + signatureName.toUri() + "\"";
-      return false;
-    }
-  }
-  else if (checkerType == "hierarchical") {
-    // This just means the data/interest name has the signing identity as a prefix.
-    // That means everything before "ksk-?" in the key name.
-    var identityRegex = "^([^<KEY>]*)<KEY>(<>*)<ksk-.+><ID-CERT>";
-    var identityMatch = new NdnRegexTopMatcher(identityRegex);
-    if (identityMatch.match(signatureName)) {
-      var identityPrefix = identityMatch.expand("\\1").append
-        (identityMatch.expand("\\2"));
-      if (ConfigPolicyManager.matchesRelation
-          (objectName, identityPrefix, "is-prefix-of"))
-        return true;
-      else {
-        failureReason[0] = "The hierarchical objectName \"" + objectName.toUri() +
-          "\" is not a prefix of \"" + identityPrefix.toUri() + "\"";
-        return false;
-      }
-    }
-
-    if (!this.isSecurityV1_) {
-      // Check for a security v2 key name.
-      var identityRegex2 = "^(<>*)<KEY><>$";
-      var identityMatch2 = new NdnRegexTopMatcher(identityRegex2);
-      if (identityMatch2.match(signatureName)) {
-        var identityPrefix = identityMatch2.expand("\\1");
-        if (ConfigPolicyManager.matchesRelation
-            (objectName, identityPrefix, "is-prefix-of"))
-          return true;
-        else {
-          failureReason[0] = "The hierarchical objectName \"" + objectName.toUri() +
-            "\" is not a prefix of \"" + identityPrefix.toUri() + "\"";
-          return false;
-        }
-      }
-    }
-
-    failureReason[0] = "The hierarchical identityRegex \"" + identityRegex +
-      "\" does not match signatureName \"" + signatureName.toUri() + "\"";
-    return false;
-  }
-  else if (checkerType == "customized") {
-    var keyLocatorInfo = checker.get("key-locator")[0];
-    // Not checking type - only name is supported.
-
-    // Is this a simple relation?
-    var relationType = keyLocatorInfo.getFirstValue("relation");
-    if (relationType != null) {
-      var matchName = new Name(keyLocatorInfo.get("name")[0].getValue());
-      if (ConfigPolicyManager.matchesRelation
-          (signatureName, matchName, relationType))
-        return true;
-      else {
-        failureReason[0] = "The custom signatureName \"" + signatureName.toUri() +
-          "\" does not match matchName \"" + matchName.toUri() +
-          "\" using relation " + relationType;
-        return false;
-      }
-    }
-
-    // Is this a simple regex?
-    var keyRegex = keyLocatorInfo.getFirstValue("regex");
-    if (keyRegex != null) {
-      if (new NdnRegexTopMatcher(simpleKeyRegex).match(signatureName))
-        return true;
-      else {
-        failureReason[0] = "The custom signatureName \"" + signatureName.toUri() +
-          "\" does not regex match simpleKeyRegex \"" + keyRegex + "\"";
-        return false;
-      }
-    }
-
-    // Is this a hyper-relation?
-    var hyperRelationList = keyLocatorInfo.get("hyper-relation");
-    if (hyperRelationList.length >= 1) {
-      var hyperRelation = hyperRelationList[0];
-
-      var keyRegex = hyperRelation.getFirstValue("k-regex");
-      var keyExpansion = hyperRelation.getFirstValue("k-expand");
-      var nameRegex = hyperRelation.getFirstValue("p-regex");
-      var nameExpansion = hyperRelation.getFirstValue("p-expand");
-      var relationType = hyperRelation.getFirstValue("h-relation");
-      if (keyRegex != null && keyExpansion != null && nameRegex != null &&
-          nameExpansion != null && relationType != null) {
-        var keyMatch = new NdnRegexTopMatcher(keyRegex);
-        if (!keyMatch.match(signatureName)) {
-          failureReason[0] = "The custom hyper-relation signatureName \"" +
-            signatureName.toUri() + "\" does not match the keyRegex \"" +
-            keyRegex + "\"";
-          return false;
-        }
-        var keyMatchPrefix = keyMatch.expand(keyExpansion);
-
-        var nameMatch = new NdnRegexTopMatcher(nameRegex);
-        if (!nameMatch.match(objectName)) {
-          failureReason[0] = "The custom hyper-relation objectName \"" +
-            objectName.toUri() + "\" does not match the nameRegex \"" +
-            nameRegex + "\"";
-          return false;
-        }
-        var nameMatchExpansion = nameMatch.expand(nameExpansion);
-
-        if (ConfigPolicyManager.matchesRelation
-            (nameMatchExpansion, keyMatchPrefix, relationType))
-          return true;
-        else {
-          failureReason[0] = "The custom hyper-relation nameMatch \"" +
-            nameMatchExpansion.toUri() + "\" does not match the keyMatchPrefix \"" +
-            keyMatchPrefix.toUri() + "\" using relation " + relationType;
-          return false;
-        }
-      }
-    }
-  }
-
-  failureReason[0] = "Unrecognized checkerType: " + checkerType;
-  return false;
-};
-
-/**
- * This looks up certificates specified as base64-encoded data or file names.
- * These are cached by filename or encoding to avoid repeated reading of files
- * or decoding.
- * @param {string} certID
- * @param {boolean} isPath
- * @return {IdentityCertificate} The certificate object, or null if not found.
- */
-ConfigPolicyManager.prototype.lookupCertificate = function(certID, isPath)
-{
-  if (!this.isSecurityV1_)
-    throw new SecurityException(new Error
-      ("lookupCertificate: For security v2, use lookupCertificateV2()"));
-
-  var cert;
-
-  var cachedCertUri = this.fixedCertificateCache[certID];
-  if (cachedCertUri === undefined) {
-    if (isPath)
-      // load the certificate data (base64 encoded IdentityCertificate)
-      cert = ConfigPolicyManager.TrustAnchorRefreshManager.loadIdentityCertificateFromFile
-        (certID);
-    else {
-      var certData = new Buffer(certID, 'base64');
-      cert = new IdentityCertificate();
-      cert.wireDecode(certData);
-    }
-
-    var certUri = cert.getName().getPrefix(-1).toUri();
-    this.fixedCertificateCache[certID] = certUri;
-    this.certificateCache_.insertCertificate(cert);
-  }
-  else
-    cert = this.certificateCache_.getCertificate(new Name(cachedCertUri));
-
-  return cert;
-};
-
-/**
- * This looks up certificates specified as base64-encoded data or file names.
- * These are cached by filename or encoding to avoid repeated reading of files
- * or decoding.
- * @param {string} certID
- * @param {boolean} isPath
- * @return {CertificateV2} The certificate object, or null if not found.
- */
-ConfigPolicyManager.prototype.lookupCertificateV2 = function(certID, isPath)
-{
-  if (this.isSecurityV1_)
-    throw new SecurityException(new Error
-      ("lookupCertificateV2: For security v1, use lookupCertificate()"));
-
-  var cert;
-
-  var cachedCertUri = this.fixedCertificateCache[certID];
-  if (cachedCertUri === undefined) {
-    if (isPath)
-      // load the certificate data (base64 encoded IdentityCertificate)
-      cert = ConfigPolicyManager.TrustAnchorRefreshManager.loadCertificateV2FromFile
-        (certID);
-    else {
-      var certData = new Buffer(certID, 'base64');
-      cert = new CertificateV2();
-      cert.wireDecode(certData);
-    }
-
-    var certUri = cert.getName().getPrefix(-1).toUri();
-    this.fixedCertificateCache[certID] = certUri;
-    this.certificateCacheV2_.insert(cert);
-  }
-  else
-    cert = this.certificateCacheV2_.find(new Name(cachedCertUri));
-
-  return cert;
-};
-
-/**
- * Search the configuration file for the first rule that matches the data or
- * signed interest name. In the case of interests, the name to match should
- * exclude the timestamp, nonce, and signature components.
- * @param {Name} objName The name to be matched.
- * @param {string} matchType The rule type to match, "data" or "interest".
- * @return {BoostInfoTree} The matching rule, or null if not found.
- */
-ConfigPolicyManager.prototype.findMatchingRule = function(objName, matchType)
-{
-  var rules = this.config.getRoot().get("validator/rule");
-  for (var iRule = 0; iRule < rules.length; ++iRule) {
-    var r = rules[iRule];
-
-    if (r.get('for')[0].getValue() == matchType) {
-      var passed = true;
-      var filters = r.get('filter');
-      if (filters.length == 0)
-        // No filters means we pass!
-        return r;
-      else {
-        for (var iFilter = 0; iFilter < filters.length; ++iFilter) {
-          var f = filters[iFilter];
-
-          // Don't check the type - it can only be name for now.
-          // We need to see if this is a regex or a relation.
-          var regexPattern = f.getFirstValue("regex");
-          if (regexPattern === null) {
-            var matchRelation = f.get('relation')[0].getValue();
-            var matchUri = f.get('name')[0].getValue();
-            var matchName = new Name(matchUri);
-            passed = ConfigPolicyManager.matchesRelation(objName, matchName, matchRelation);
-          }
-          else
-            passed = new NdnRegexTopMatcher(regexPattern).match(objName);
-
-          if (!passed)
-            break;
-        }
-
-        if (passed)
-          return r;
-      }
-    }
-  }
-
-  return null;
-};
-
-/**
- * Determines if a name satisfies the relation to matchName.
- * @param {Name} name
- * @param {Name} matchName
- * @param {string} matchRelation Can be one of:
- *   'is-prefix-of' - passes if the name is equal to or has the other
- *      name as a prefix
- *   'is-strict-prefix-of' - passes if the name has the other name as a
- *      prefix, and is not equal
- *   'equal' - passes if the two names are equal
- * @return {boolean}
- */
-ConfigPolicyManager.matchesRelation = function(name, matchName, matchRelation)
-{
-  var passed = false;
-  if (matchRelation == 'is-strict-prefix-of') {
-    if (matchName.size() == name.size())
-      passed = false;
-    else if (matchName.match(name))
-      passed = true;
-  }
-  else if (matchRelation == 'is-prefix-of') {
-    if (matchName.match(name))
-      passed = true;
-  }
-  else if (matchRelation == 'equal') {
-    if (matchName.equals(name))
-      passed = true;
-  }
-  return passed;
-};
-
-/**
- * Extract the signature information from the interest name or from the data
- * packet or interest.
- * @param {Data|Interest} dataOrInterest The object whose signature is needed.
- * @param {WireFormat} wireFormat (optional) The wire format used to decode
- * signature information from the interest name.
- * @return {Signature} The object of a sublcass of Signature or null if can't
- * decode.
- */
-ConfigPolicyManager.extractSignature = function(dataOrInterest, wireFormat)
-{
-  if (dataOrInterest instanceof Data)
-    return dataOrInterest.getSignature();
-  else if (dataOrInterest instanceof Interest) {
-    wireFormat = (wireFormat || WireFormat.getDefaultWireFormat());
-    try {
-      var signature = wireFormat.decodeSignatureInfoAndValue
-        (dataOrInterest.getName().get(-2).getValue().buf(),
-         dataOrInterest.getName().get(-1).getValue().buf(), false);
-    }
-    catch (e) {
-      return null;
-    }
-
-    return signature;
-  }
-
-  return null;
-};
-
-/**
- * Determine whether the timestamp from the interest is newer than the last use
- * of this key, or within the grace interval on first use.
- * @param {Name} keyName The name of the public key used to sign the interest.
- * @param {number} timestamp The timestamp extracted from the interest name.
- * @param {Array<string>} failureReason If matching fails, set failureReason[0]
- * to the failure reason.
- * @return {boolean} True if timestamp is fresh as described above.
- */
-ConfigPolicyManager.prototype.interestTimestampIsFresh = function
-  (keyName, timestamp, failureReason)
-{
-  var lastTimestamp = this.keyTimestamps[keyName.toUri()];
-  if (lastTimestamp == undefined) {
-    var now = new Date().getTime();
-    var notBefore = now - this.keyGraceInterval;
-    var notAfter = now + this.keyGraceInterval;
-    if (!(timestamp > notBefore && timestamp < notAfter)) {
-      failureReason[0] =
-        "The command interest timestamp is not within the first use grace period of " +
-        this.keyGraceInterval + " milliseconds.";
-      return false;
-    }
-    else
-      return true;
-  }
-  else {
-    if (timestamp <= lastTimestamp) {
-      failureReason[0] =
-        "The command interest timestamp is not newer than the previous timestamp";
-      return false;
-    }
-    else
-      return true;
-  }
-};
-
-/**
- * Trim the table size down if necessary, and insert/update the latest interest
- * signing timestamp for the key. Any key which has not been used within the TTL
- * period is purged. If the table is still too large, the oldest key is purged.
- * @param {Name} keyName The name of the public key used to sign the interest.
- * @param {number} timestamp The timestamp extracted from the interest name.
- */
-ConfigPolicyManager.prototype.updateTimestampForKey = function
-  (keyName, timestamp)
-{
-  this.keyTimestamps[keyName.toUri()] = timestamp;
-
-  // JavaScript does have a direct way to get the number of entries, so first
-  //   get the keysToErase while counting.
-  var keyTimestampsSize = 0;
-  var keysToErase = [];
-
-  var now = new Date().getTime();
-  var oldestTimestamp = now;
-  var oldestKey = null;
-  for (var keyUri in this.keyTimestamps) {
-    ++keyTimestampsSize;
-    var ts = this.keyTimestamps[keyUri];
-    if (now - ts > this.keyTimestampTtl)
-      keysToErase.push(keyUri);
-    else if (ts < oldestTimestamp) {
-      oldestTimestamp = ts;
-      oldestKey = keyUri;
-    }
-  }
-
-  if (keyTimestampsSize >= this.maxTrackedKeys) {
-    // Now delete the expired keys.
-    for (var i = 0; i < keysToErase.length; ++i) {
-      delete this.keyTimestamps[keysToErase[i]];
-      --keyTimestampsSize;
-    }
-
-    if (keyTimestampsSize > this.maxTrackedKeys)
-      // We have not removed enough.
-      delete this.keyTimestamps[oldestKey];
-  }
-};
-
-/**
- * Check the type of signatureInfo to get the KeyLocator. Look in the
- * IdentityStorage for the public key with the name in the KeyLocator and use it
- * to verify the signedBlob. If the public key can't be found, return false.
- * (This is a generalized method which can verify both a data packet and an
- * interest.)
- * @param {Signature} signatureInfo An object of a subclass of Signature, e.g.
- * Sha256WithRsaSignature.
- * @param {SignedBlob} signedBlob The SignedBlob with the signed portion to
- * verify.
- * @param {function} onComplete This calls onComplete(true, undefined) if the
- * signature verifies, otherwise onComplete(false, reason).
- */
-ConfigPolicyManager.prototype.verify = function
-  (signatureInfo, signedBlob, onComplete)
-{
-  // We have already checked once that there is a key locator.
-  var keyLocator = KeyLocator.getFromSignature(signatureInfo);
-
-  if (keyLocator.getType() == KeyLocatorType.KEYNAME) {
-    // Assume the key name is a certificate name.
-    var signatureName = keyLocator.getKeyName();
-
-    var publicKeyDer;
-    if (this.isSecurityV1_) {
-      var certificate = this.refreshManager.getCertificate(signatureName);
-      if (certificate == null)
-        certificate = this.certificateCache_.getCertificate(signatureName);
-      if (certificate == null) {
-        onComplete(false,  "Cannot find a certificate with name " +
-          signatureName.toUri());
-        return;
-      }
-
-      publicKeyDer = certificate.getPublicKeyInfo().getKeyDer();
-      if (publicKeyDer.isNull()) {
-        // Can't find the public key with the name.
-        onComplete(false, "There is no public key in the certificate with name " +
-          certificate.getName().toUri());
-        return;
-      }
-    }
-    else {
-      var certificate = this.refreshManager.getCertificateV2(signatureName);
-      if (certificate == null)
-        certificate = this.certificateCacheV2_.find(signatureName);
-      if (certificate == null) {
-        onComplete(false,  "Cannot find a certificate with name " +
-          signatureName.toUri());
-        return;
-      }
-
-      try {
-        publicKeyDer = certificate.getPublicKey();
-      } catch (ex) {
-        // We don't expect this to happen.
-        onComplete(false, "There is no public key in the certificate with name " +
-          certificate.getName().toUri());
-        return;
-      }
-    }
-
-    PolicyManager.verifySignature
-      (signatureInfo, signedBlob, publicKeyDer, function(verified) {
-        if (verified)
-          onComplete(true);
-        else
-          onComplete
-            (false,
-             "The signature did not verify with the given public key");
-      });
-  }
-  else
-    onComplete(false, "The KeyLocator does not have a key name");
-};
-
-/**
- * Manages the trust-anchor certificates, including refresh.
- * @constructor
- */
-ConfigPolicyManager.TrustAnchorRefreshManager =
-  function ConfigPolicyManagerTrustAnchorRefreshManager(isSecurityV1)
-{
-  this.isSecurityV1_ = isSecurityV1;
-
-  this.certificateCache_ = new CertificateCache();
-  this.certificateCacheV2_ = new CertificateCacheV2();
-  // Maps the directory name to certificate names so they can be deleted when
-  // necessary. The key is the directory name string. The value is the object
-  //  {certificateNames,  // array of string
-  //   nextRefresh,       // number
-  //   refreshPeriod      // number
-  //  }.
-  this.refreshDirectories = {};
-};
-
-/**
- * @param {string} fileName
- * @return {IdentityCertificate}
- */
-ConfigPolicyManager.TrustAnchorRefreshManager.loadIdentityCertificateFromFile =
-  function(fileName)
-{
-  var encodedData = fs.readFileSync(fileName).toString();
-  var decodedData = new Buffer(encodedData, 'base64');
-  var cert = new IdentityCertificate();
-  cert.wireDecode(new Blob(decodedData, false));
-  return cert;
-};
-
-/**
- * @param {string} fileName
- * @return {CertificateV2}
- */
-ConfigPolicyManager.TrustAnchorRefreshManager.loadCertificateV2FromFile =
-  function(fileName)
-{
-  var encodedData = fs.readFileSync(fileName).toString();
-  var decodedData = new Buffer(encodedData, 'base64');
-  var cert = new CertificateV2();
-  cert.wireDecode(new Blob(decodedData, false));
-  return cert;
-};
-
-/**
- * @param {Name} certificateName
- * @return {IdentityCertificate}
- */
-ConfigPolicyManager.TrustAnchorRefreshManager.prototype.getCertificate = function
-  (certificateName)
-{
-  if (!this.isSecurityV1_)
-    throw new SecurityException(new Error
-      ("getCertificate: For security v2, use getCertificateV2()"));
-
-  // This assumes the timestamp is already removed.
-  return this.certificateCache_.getCertificate(certificateName);
-};
-
-/**
- * @param {Name} certificateName
- * @return {CertificateV2}
- */
-ConfigPolicyManager.TrustAnchorRefreshManager.prototype.getCertificateV2 = function
-  (certificateName)
-{
-  if (this.isSecurityV1_)
-    throw new SecurityException(new Error
-      ("getCertificateV2: For security v1, use getCertificate()"));
-
-  // This assumes the timestamp is already removed.
-  return this.certificateCacheV2_.find(certificateName);
-};
-
-// refreshPeriod in milliseconds.
-ConfigPolicyManager.TrustAnchorRefreshManager.prototype.addDirectory = function
-  (directoryName, refreshPeriod)
-{
-  var allFiles;
-  try {
-    allFiles = fs.readdirSync(directoryName);
-  }
-  catch (e) {
-    throw new SecurityException(new Error
-      ("Cannot list files in directory " + directoryName));
-  }
-
-  var certificateNames = [];
-  for (var i = 0; i < allFiles.length; ++i) {
-    if (this.isSecurityV1_) {
-      var cert;
-      try {
-        var fullPath = path.join(directoryName, allFiles[i]);
-        cert = ConfigPolicyManager.TrustAnchorRefreshManager.loadIdentityCertificateFromFile
-          (fullPath);
-      }
-      catch (e) {
-        // Allow files that are not certificates.
-        continue;
-      }
-
-      // Cut off the timestamp so it matches the KeyLocator Name format.
-      var certUri = cert.getName().getPrefix(-1).toUri();
-      this.certificateCache_.insertCertificate(cert);
-      certificateNames.push(certUri);
-    }
-    else {
-      var cert;
-      try {
-        var fullPath = path.join(directoryName, allFiles[i]);
-        cert = ConfigPolicyManager.TrustAnchorRefreshManager.loadCertificateV2FromFile
-          (fullPath);
-      }
-      catch (e) {
-        // Allow files that are not certificates.
-        continue;
-      }
-
-      // Get the key name since this is in the KeyLocator.
-      var certUri = CertificateV2.extractKeyNameFromCertName
-        (cert.getName()).toUri();
-      this.certificateCacheV2_.insert(cert);
-      certificateNames.push(certUri);
-    }
-  }
-
-  this.refreshDirectories[directoryName] = {
-    certificates: certificateNames,
-    nextRefresh: new Date().getTime() + refreshPeriod,
-    refreshPeriod: refreshPeriod };
-};
-
-ConfigPolicyManager.TrustAnchorRefreshManager.prototype.refreshAnchors = function()
-{
-  var refreshTime =  new Date().getTime();
-  for (var directory in this.refreshDirectories) {
-    var info = this.refreshDirectories[directory];
-    var nextRefreshTime = info.nextRefresh;
-    if (nextRefreshTime <= refreshTime) {
-      var certificateList = info.certificates.slice(0);
-      // Delete the certificates associated with this directory if possible
-      //   then re-import.
-      // IdentityStorage subclasses may not support deletion.
-      for (var i = 0; i < certificateList.length; ++i) {
-        try {
-          if (this.isSecurityV1_)
-            this.certificateCache_.deleteCertificate(new Name(certificateList[i]));
-          else {
-            // The name in the CertificateCacheV2 contains the but the name in
-            // the certificateList does not, so find the certificate based on
-            // the prefix first.
-            var foundCertificate = this.certificateCacheV2_.find
-              (new Name(certificateList[i]));
-            if (foundCertificate != null)
-              this.certificateCacheV2_.deleteCertificate
-                (foundCertificate.getName());
-          }
-        } catch (ex) {
-          // Was already removed or not supported?
-        }
-      }
-
-      this.addDirectory(directory, info.refreshPeriod);
-    }
-  }
-};
-/**
- * Copyright (C) 2014-2019 Regents of the University of California.
- * @author: Jeff Thompson <jefft0@remap.ucla.edu>
- * From ndn-cxx security by Yingdi Yu <yingdi@cs.ucla.edu>.
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU Lesser General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU Lesser General Public License for more details.
- *
- * You should have received a copy of the GNU Lesser General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
- * A copy of the GNU Lesser General Public License is in the file COPYING.
- */
-
-/** @ignore */
-var Name = require('../../name.js').Name; /** @ignore */
-var PolicyManager = require('./policy-manager.js').PolicyManager; /** @ignore */
-var NdnCommon = require('../../util/ndn-common.js').NdnCommon;
-
-/**
- * @constructor
- */
-var NoVerifyPolicyManager = function NoVerifyPolicyManager()
-{
-  // Call the base constructor.
-  PolicyManager.call(this);
-};
-
-NoVerifyPolicyManager.prototype = new PolicyManager();
-NoVerifyPolicyManager.prototype.name = "NoVerifyPolicyManager";
-
-exports.NoVerifyPolicyManager = NoVerifyPolicyManager;
-
-/**
- * Override to always skip verification and trust as valid.
- *
- * @param {Data|Interest} dataOrInterest The received data packet or interest.
- * @return {boolean} True.
- */
-NoVerifyPolicyManager.prototype.skipVerifyAndTrust = function(dataOrInterest)
-{
-  return true;
-};
-
-/**
- * Override to return false for no verification rule for the received data or
- * signed interest.
- *
- * @param {Data|Interest} dataOrInterest The received data packet or interest.
- * @return {boolean} False.
- */
-NoVerifyPolicyManager.prototype.requireVerify = function(dataOrInterest)
-{
-  return false;
-};
-
-/**
- * Override to call onVerified(data) and to indicate no further verification
- * step.
- *
- * @param {Data|Interest} dataOrInterest The Data object or interest with the
- * signature to check.
- * @param {number} stepCount The number of verification steps that have been
- * done, used to track the verification progress.
- * @param {function} onVerified This does override to call
- * onVerified(dataOrInterest).
- * NOTE: The library will log any exceptions thrown by this callback, but for
- * better error handling the callback should catch and properly handle any
- * exceptions.
- * @param {function} onValidationFailed Override to ignore this.
- * @param {WireFormat} wireFormat
- * @return {ValidationRequest} null for no further step for looking up a
- * certificate chain.
- */
-NoVerifyPolicyManager.prototype.checkVerificationPolicy = function
-  (dataOrInterest, stepCount, onVerified, onValidationFailed, wireFormat)
-{
-  try {
-    onVerified(dataOrInterest);
-  } catch (ex) {
-    console.log("Error in onVerified: " + NdnCommon.getErrorWithStackTrace(ex));
-  }
-  return null;
-};
-
-/**
- * Override to always indicate that the signing certificate name and data name
- * satisfy the signing policy.
- *
- * @param {Name} dataName The name of data to be signed.
- * @param {Name} certificateName The name of signing certificate.
- * @return {boolean} True to indicate that the signing certificate can be used
- * to sign the data.
- */
-NoVerifyPolicyManager.prototype.checkSigningPolicy = function
-  (dataName, certificateName)
-{
-  return true;
-};
-
-/**
- * Override to indicate that the signing identity cannot be inferred.
- *
- * @param {Name} dataName The name of data to be signed.
- * @return {Name} An empty name because cannot infer.
- */
-NoVerifyPolicyManager.prototype.inferSigningIdentity = function(dataName)
-{
-  return new Name();
-};
-/**
- * Copyright (C) 2014-2019 Regents of the University of California.
- * @author: Jeff Thompson <jefft0@remap.ucla.edu>
- * From ndn-cxx security by Yingdi Yu <yingdi@cs.ucla.edu>.
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU Lesser General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU Lesser General Public License for more details.
- *
- * You should have received a copy of the GNU Lesser General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
- * A copy of the GNU Lesser General Public License is in the file COPYING.
- */
-
-/** @ignore */
-var Name = require('../../name.js').Name; /** @ignore */
-var Interest = require('../../interest.js').Interest; /** @ignore */
-var Data = require('../../data.js').Data; /** @ignore */
-var Blob = require('../../util/blob.js').Blob; /** @ignore */
-var IdentityCertificate = require('../certificate/identity-certificate.js').IdentityCertificate; /** @ignore */
-var KeyLocator = require('../../key-locator.js').KeyLocator; /** @ignore */
-var KeyLocatorType = require('../../key-locator.js').KeyLocatorType; /** @ignore */
-var SecurityException = require('../security-exception.js').SecurityException; /** @ignore */
-var WireFormat = require('../../encoding/wire-format.js').WireFormat; /** @ignore */
-var SyncPromise = require('../../util/sync-promise.js').SyncPromise; /** @ignore */
-var PolicyManager = require('./policy-manager.js').PolicyManager; /** @ignore */
-var IdentityStorage = require('../identity/identity-storage.js').IdentityStorage; /** @ignore */
-var NdnCommon = require('../../util/ndn-common.js').NdnCommon;
-
-/**
- * A SelfVerifyPolicyManager implements a PolicyManager to look up the public
- * key in the given storage. If the public key can't be found, the verification
- * fails.
- *
- * @param {IdentityStorage|PibImpl} storage (optional) The IdentityStorage or
- * PibImpl for looking up the public key. This object must remain valid during
- * the life of this SelfVerifyPolicyManager. If omitted, then don't look for a
- * public key with the name in the KeyLocator and rely on the KeyLocator having
- * the full public key DER.
- * @constructor
- */
-var SelfVerifyPolicyManager = function SelfVerifyPolicyManager(storage)
-{
-  // Call the base constructor.
-  PolicyManager.call(this);
-
-  if (storage instanceof IdentityStorage) {
-    this.identityStorage_ = storage;
-    this.pibImpl_ = null;
-  }
-  else {
-    this.identityStorage_ = null;
-    this.pibImpl_ = storage;
-  }
-};
-
-SelfVerifyPolicyManager.prototype = new PolicyManager();
-SelfVerifyPolicyManager.prototype.name = "SelfVerifyPolicyManager";
-
-exports.SelfVerifyPolicyManager = SelfVerifyPolicyManager;
-
-/**
- * Never skip verification.
- *
- * @param {Data|Interest} dataOrInterest The received data packet or interest.
- * @return {boolean} False.
- */
-SelfVerifyPolicyManager.prototype.skipVerifyAndTrust = function(dataOrInterest)
-{
-  return false;
-};
-
-/**
- * Always return true to use the self-verification rule for the received data.
- *
- * @param {Data|Interest} dataOrInterest The received data packet or interest.
- * @return {boolean} True.
- */
-SelfVerifyPolicyManager.prototype.requireVerify = function(dataOrInterest)
-{
-  return true;
-};
-
-/**
- * Look in the storage for the public key with the name in the KeyLocator (if
- * available) and use it to verify the data packet.  If the public key can't be
- * found, call onValidationFailed.
- *
- * @param {Data|Interest} dataOrInterest The Data object or interest with the
- * signature to check.
- * @param {number} stepCount The number of verification steps that have been
- * done, used to track the verification progress.
- * @param {function} onVerified If the signature is verified, this calls
- * onVerified(dataOrInterest).
- * NOTE: The library will log any exceptions thrown by this callback, but for
- * better error handling the callback should catch and properly handle any
- * exceptions.
- * @param {function} onValidationFailed If the signature check fails, this calls
- * onValidationFailed(dataOrInterest, reason).
- * NOTE: The library will log any exceptions thrown by this callback, but for
- * better error handling the callback should catch and properly handle any
- * exceptions.
- * @param {WireFormat} wireFormat
- * @return {ValidationRequest} null for no further step for looking up a
- * certificate chain.
- */
-SelfVerifyPolicyManager.prototype.checkVerificationPolicy = function
-  (dataOrInterest, stepCount, onVerified, onValidationFailed, wireFormat)
-{
-  wireFormat = (wireFormat || WireFormat.getDefaultWireFormat());
-
-  if (dataOrInterest instanceof Data) {
-    var data = dataOrInterest;
-    // wireEncode returns the cached encoding if available.
-    this.verify(data.getSignature(), data.wireEncode(), function(verified, reason) {
-      if (verified) {
-        try {
-          onVerified(data);
-        } catch (ex) {
-          console.log("Error in onVerified: " + NdnCommon.getErrorWithStackTrace(ex));
-        }
-      }
-      else {
-        try {
-          onValidationFailed(data, reason);
-        } catch (ex) {
-          console.log("Error in onValidationFailed: " + NdnCommon.getErrorWithStackTrace(ex));
-        }
-      }
-    });
-  }
-  else if (dataOrInterest instanceof Interest) {
-    var interest = dataOrInterest;
-
-    if (interest.getName().size() < 2) {
-      try {
-        onValidationFailed
-          (interest, "The signed interest has less than 2 components: " +
-             interest.getName().toUri());
-      } catch (ex) {
-        console.log("Error in onValidationFailed: " + NdnCommon.getErrorWithStackTrace(ex));
-      }
-      return;
-    }
-
-    // Decode the last two name components of the signed interest
-    var signature;
-    try {
-      signature = wireFormat.decodeSignatureInfoAndValue
-        (interest.getName().get(-2).getValue().buf(),
-         interest.getName().get(-1).getValue().buf(), false);
-    } catch (ex) {
-      try {
-        onValidationFailed
-          (interest, "Error decoding the signed interest signature: " + ex);
-      } catch (ex) {
-        console.log("Error in onValidationFailed: " + NdnCommon.getErrorWithStackTrace(ex));
-      }
-      return;
-    }
-
-    // wireEncode returns the cached encoding if available.
-    this.verify(signature, interest.wireEncode(), function(verified, reason) {
-      if (verified) {
-        try {
-          onVerified(interest);
-        } catch (ex) {
-          console.log("Error in onVerified: " + NdnCommon.getErrorWithStackTrace(ex));
-        }
-      }
-      else {
-        try {
-          onValidationFailed(interest, reason);
-        } catch (ex) {
-          console.log("Error in onValidationFailed: " + NdnCommon.getErrorWithStackTrace(ex));
-        }
-      }
-    });
-  }
-  else
-    throw new SecurityException(new Error
-      ("checkVerificationPolicy: unrecognized type for dataOrInterest"));
-
-  // No more steps, so return null.
-  return null;
-};
-
-/**
- * Override to always indicate that the signing certificate name and data name
- * satisfy the signing policy.
- *
- * @param {Name} dataName The name of data to be signed.
- * @param {Name} certificateName The name of signing certificate.
- * @return {boolean} True to indicate that the signing certificate can be used
- * to sign the data.
- */
-SelfVerifyPolicyManager.prototype.checkSigningPolicy = function
-  (dataName, certificateName)
-{
-  return true;
-};
-
-/**
- * Override to indicate that the signing identity cannot be inferred.
- *
- * @param {Name} dataName The name of data to be signed.
- * @return {Name} An empty name because cannot infer.
- */
-SelfVerifyPolicyManager.prototype.inferSigningIdentity = function(dataName)
-{
-  return new Name();
-};
-
-/**
- * Check the type of signatureInfo to get the KeyLocator. Look in the storage
- * for the public key with the name in the KeyLocator (if available) and use it
- * to verify the signedBlob. If the public key can't be found, return false.
- * (This is a generalized method which can verify both a Data packet and an
- * Interest.)
- * @param {Signature} signatureInfo An object of a subclass of Signature, e.g.
- * Sha256WithRsaSignature.
- * @param {SignedBlob} signedBlob the SignedBlob with the signed portion to
- * verify.
- * @param {function} onComplete This calls onComplete(true, undefined) if the
- * signature verifies, otherwise onComplete(false, reason).
- */
-SelfVerifyPolicyManager.prototype.verify = function
-  (signatureInfo, signedBlob, onComplete)
-{
-  if (KeyLocator.canGetFromSignature(signatureInfo)) {
-    this.getPublicKeyDer
-      (KeyLocator.getFromSignature(signatureInfo), function(publicKeyDer, reason) {
-        if (publicKeyDer.isNull())
-          onComplete(false, reason);
-        else {
-          try {
-            PolicyManager.verifySignature
-              (signatureInfo, signedBlob, publicKeyDer, function(verified) {
-                if (verified)
-                  onComplete(true);
-                else
-                  onComplete
-                    (false,
-                     "The signature did not verify with the given public key");
-              });
-          } catch (ex) {
-            onComplete(false, "Error in verifySignature: " + ex);
-          }
-        }
-      });
-  }
-  else {
-    try {
-      // Assume that the signature type does not require a public key.
-      PolicyManager.verifySignature
-        (signatureInfo, signedBlob, null, function(verified) {
-          if (verified)
-            onComplete(true);
-          else
-            onComplete
-              (false, "The signature did not verify with the given public key");
-        });
-    } catch (ex) {
-      onComplete(false, "Error in verifySignature: " + ex);
-    }
-  }
-};
-
-/**
- * Look in the storage for the public key with the name in the KeyLocator (if
- * available). If the public key can't be found, return and empty Blob.
- * @param {KeyLocator} keyLocator The KeyLocator.
- * @param {function} onComplete This calls
- * onComplete(publicKeyDer, reason) where publicKeyDer is the public key
- * DER Blob or an isNull Blob if not found and reason is the reason
- * string if not found.
- */
-SelfVerifyPolicyManager.prototype.getPublicKeyDer = function
-  (keyLocator, onComplete)
-{
-  if (keyLocator.getType() == KeyLocatorType.KEYNAME &&
-      this.identityStorage_ != null) {
-    var keyName;
-    try {
-      // Assume the key name is a certificate name.
-      keyName = IdentityCertificate.certificateNameToPublicKeyName
-        (keyLocator.getKeyName());
-    } catch (ex) {
-      onComplete
-        (new Blob(), "Cannot get a public key name from the certificate named: " +
-           keyLocator.getKeyName().toUri());
-      return;
-    }
-    SyncPromise.complete
-      (onComplete,
-       function(err) {
-         // The storage doesn't have the key.
-         onComplete
-           (new Blob(), "The identityStorage doesn't have the key named " +
-              keyName.toUri());
-       },
-       this.identityStorage_.getKeyPromise(keyName, !onComplete));
-  }
-  else if (keyLocator.getType() == KeyLocatorType.KEYNAME &&
-           this.pibImpl_ != null) {
-    SyncPromise.complete
-      (onComplete,
-       function(err) {
-         // The storage doesn't have the key.
-         onComplete
-           (new Blob(), "The identityStorage doesn't have the key named " +
-              keyName.toUri());
-       },
-       this.pibImpl_.getKeyBitsPromise(keyLocator.getKeyName(), !onComplete));
-  }
-  else
-    // Can't find a key to verify.
-    onComplete(new Blob(), "The signature KeyLocator doesn't have a key name");
-};
-/**
  * Copyright (C) 2017-2019 Regents of the University of California.
  * @author: Jeff Thompson <jefft0@remap.ucla.edu>
  * @author: From ndn-cxx security https://github.com/named-data/ndn-cxx/blob/master/ndn-cxx/security/tpm/back-end.cpp
@@ -34212,7 +27793,7 @@ TpmKeyHandleMemory.prototype.doDecryptPromise_ = function(cipherText, useSync)
  * A protected method to do the work of derivePublicKey().
  * @return {Blob} The public key encoding Blob.
  */
-TpmKeyHandle.prototype.doDerivePublicKey_ = function()
+TpmKeyHandleMemory.prototype.doDerivePublicKey_ = function()
 {
   try {
     return this.key_.derivePublicKey();
@@ -34343,20 +27924,20 @@ TpmPrivateKey.prototype.loadPkcs1 = function(encoding, keyType)
   if (keyType == KeyType.EC) {
     // Encode the DER as PEM.
     var keyBase64 = encoding.toString('base64');
-    var keyPem = "-----BEGIN EC PRIVATE KEY-----\n";
+    var keyPem = "-----BEGIN EC" + " PRIVATE KEY-----\n";
     for (var i = 0; i < keyBase64.length; i += 64)
       keyPem += (keyBase64.substr(i, 64) + "\n");
-    keyPem += "-----END EC PRIVATE KEY-----";
+    keyPem += "-----END EC" + " PRIVATE KEY-----";
 
     this.privateKey_ = keyPem;
   }
   else if (keyType == KeyType.RSA) {
     // Encode the DER as PEM.
     var keyBase64 = encoding.toString('base64');
-    var keyPem = "-----BEGIN RSA PRIVATE KEY-----\n";
+    var keyPem = "-----BEGIN RSA" + " PRIVATE KEY-----\n";
     for (var i = 0; i < keyBase64.length; i += 64)
       keyPem += (keyBase64.substr(i, 64) + "\n");
-    keyPem += "-----END RSA PRIVATE KEY-----";
+    keyPem += "-----END RSA" + " PRIVATE KEY-----";
 
     this.privateKey_ = keyPem;
   }
@@ -34582,30 +28163,44 @@ TpmPrivateKey.prototype.derivePublicKey = function()
     // Decode the PKCS #1 RSAPrivateKey.
     var parsedNode = DerNode.parse(rsaPrivateKeyDer, 0);
     var rsaPrivateKeyChildren = parsedNode.getChildren();
-    var modulus = rsaPrivateKeyChildren[1];
-    var publicExponent = rsaPrivateKeyChildren[2];
-
-    // Encode the PKCS #1 RSAPublicKey.
-    var rsaPublicKey = new DerNode.DerSequence();
-    rsaPublicKey.addChild(modulus);
-    rsaPublicKey.addChild(publicExponent);
-    var rsaPublicKeyDer = rsaPublicKey.encode();
-
-    // Encode the SubjectPublicKeyInfo.
-    var algorithmIdentifier = new DerNode.DerSequence();
-    algorithmIdentifier.addChild(new DerNode.DerOid(new OID
-      (TpmPrivateKey.RSA_ENCRYPTION_OID)));
-    algorithmIdentifier.addChild(new DerNode.DerNull());
-    var publicKey = new DerNode.DerSequence();
-    publicKey.addChild(algorithmIdentifier);
-    publicKey.addChild(new DerNode.DerBitString(rsaPublicKeyDer.buf(), 0));
-
-    return publicKey.encode();
+    var modulus = rsaPrivateKeyChildren[1].getPayload().buf();
+    var publicExponent = rsaPrivateKeyChildren[2].getPayload().buf();
+    return TpmPrivateKey.encodeRsaSubjectPublicKeyInfo(modulus, publicExponent);
   } catch (ex) {
     // We don't expect this to happen since the key was encoded here.
     throw new TpmPrivateKey.Error(new Error
       ("derivePublicKey: Error decoding private key " + ex));
   }
+};
+
+/**
+ * Encode the modulus and public exponent as a SubjectPublicKeyInfo with a
+ * PKCS #1 RSAPublicKey.
+ * @param {Buffer} modulus The modulus as a buffer of bytes. If the first byte
+ * is >= 0x80 then you must prepend a 0x00 byte to make it non-negative.
+ * @param {Buffer} publicExponent The public exponent as a buffer of bytes. If
+ * the first byte is >= 0x80 then you must prepend a 0x00 byte to make it
+ * non-negative.
+ * @returns {Blob} The encoded public key.
+ */
+TpmPrivateKey.encodeRsaSubjectPublicKeyInfo = function(modulus, publicExponent)
+{
+  // Encode the PKCS #1 RSAPublicKey.
+  var rsaPublicKey = new DerNode.DerSequence();
+  rsaPublicKey.addChild(new DerNode.DerInteger(modulus));
+  rsaPublicKey.addChild(new DerNode.DerInteger(publicExponent));
+  var rsaPublicKeyDer = rsaPublicKey.encode();
+
+  // Encode the SubjectPublicKeyInfo.
+  var algorithmIdentifier = new DerNode.DerSequence();
+  algorithmIdentifier.addChild(new DerNode.DerOid(new OID
+    (TpmPrivateKey.RSA_ENCRYPTION_OID)));
+  algorithmIdentifier.addChild(new DerNode.DerNull());
+  var publicKey = new DerNode.DerSequence();
+  publicKey.addChild(algorithmIdentifier);
+  publicKey.addChild(new DerNode.DerBitString(rsaPublicKeyDer.buf(), 0));
+
+  return publicKey.encode();
 };
 
 /**
@@ -34633,7 +28228,10 @@ TpmPrivateKey.prototype.decryptPromise = function
   }
 
   if (algorithmType == undefined)
+/* See https://github.com/operantnetworks/ndn-direct-ind/issues/12
     algorithmType = EncryptAlgorithmType.RsaOaep;
+ */
+    algorithmType = EncryptAlgorithmType.RsaPkcs;
 
   if (this.keyType_ == null)
     return SyncPromise.reject(new TpmPrivateKey.Error(new Error
@@ -35125,6 +28723,7 @@ TpmPrivateKey.DES_EDE3_KEY_LENGTH = 24;
 
 /** @ignore */
 var KeyType = require('../security-types').KeyType; /** @ignore */
+var Blob = require('../../util/blob.js').Blob; /** @ignore */
 var SyncPromise = require('../../util/sync-promise.js').SyncPromise;
 
 /**
@@ -36691,7 +30290,7 @@ ValidationState.prototype.verifyCertificateChainPromise_ = function
 
 /** @ignore */
 var Name = require('../../name.js').Name; /** @ignore */
-var Schedule = require('../../encrypt/schedule.js').Schedule; /** @ignore */
+var WireFormat = require('../../encoding/wire-format.js').WireFormat; /** @ignore */
 var CertificateV2 = require('./certificate-v2.js').CertificateV2; /** @ignore */
 var LOG = require('../../log.js').Log.LOG;
 
@@ -36734,7 +30333,7 @@ CertificateCacheV2.prototype.insert = function(certificate)
   var now = new Date().getTime() + this.nowOffsetMilliseconds_;
   if (notAfterTime < now) {
     if (LOG > 3) console.log("Not adding " + certificate.getName().toUri() +
-      ": already expired at " + Schedule.toIsoString(notAfterTime));
+      ": already expired at " + WireFormat.toIsoString(notAfterTime));
     return;
   }
 
@@ -37495,7 +31094,6 @@ var Sha256WithRsaSignature = require('../../sha256-with-rsa-signature.js').Sha25
 var Sha256WithEcdsaSignature = require('../../sha256-with-ecdsa-signature.js').Sha256WithEcdsaSignature; /** @ignore */
 var ContentType = require('../../meta-info.js').ContentType; /** @ignore */
 var WireFormat = require('../../encoding/wire-format.js').WireFormat; /** @ignore */
-var Schedule = require('../../encrypt/schedule.js').Schedule; /** @ignore */
 var ValidityPeriod = require('../validity-period.js').ValidityPeriod; /** @ignore */
 var InvalidArgumentException = require('../security-exception.js').InvalidArgumentException;
 
@@ -37714,9 +31312,9 @@ CertificateV2.prototype.toString = function()
   result += "Certificate name:\n";
   result += "  " + this.getName().toUri() + "\n";
   result += "Validity:\n";
-  result += "  NotBefore: " + Schedule.toIsoString
+  result += "  NotBefore: " + WireFormat.toIsoString
     (this.getValidityPeriod().getNotBefore()) + "\n";
-  result += "  NotAfter: " + Schedule.toIsoString
+  result += "  NotAfter: " + WireFormat.toIsoString
     (this.getValidityPeriod().getNotAfter()) + "\n";
 
   // TODO: Print the extension.
@@ -39952,6 +33550,18 @@ Validator.prototype.requestCertificate_ = function(certificateRequest, state)
     });
 };
 /**
+ * Copyright (C) 2020 Operant Networks, Incorporated.
+ * @author: Jeff Thompson <jefft0@gmail.com>
+ *
+ * This works is based substantially on previous work as listed below:
+ *
+ * Original file: js/security/key-chain.js
+ * Original repository: https://github.com/named-data/ndn-js
+ *
+ * Summary of Changes: Remove security v1.
+ *
+ * which was originally released under the LGPL license with the following rights:
+ *
  * Copyright (C) 2014-2019 Regents of the University of California.
  * @author: Jeff Thompson <jefft0@remap.ucla.edu>
  * From ndn-cxx security by Yingdi Yu <yingdi@cs.ucla.edu>.
@@ -39972,7 +33582,6 @@ Validator.prototype.requestCertificate_ = function(certificateRequest, state)
  */
 
 /** @ignore */
-var path = require('path'); /** @ignore */
 var fs = require('fs'); /** @ignore */
 var Crypto = require('../crypto.js'); /** @ignore */
 var LOG = require('../log.js').Log.LOG; /** @ignore */
@@ -39981,18 +33590,13 @@ var Interest = require('../interest.js').Interest; /** @ignore */
 var Data = require('../data.js').Data; /** @ignore */
 var ContentType = require('../meta-info.js').ContentType; /** @ignore */
 var Blob = require('../util/blob.js').Blob; /** @ignore */
-var ConfigFile = require('../util/config-file.js').ConfigFile; /** @ignore */
 var WireFormat = require('../encoding/wire-format.js').WireFormat; /** @ignore */
 var SecurityException = require('./security-exception.js').SecurityException; /** @ignore */
 var RsaKeyParams = require('./key-params.js').RsaKeyParams; /** @ignore */
-var BasicIdentityStorage = require('./identity/basic-identity-storage.js').BasicIdentityStorage; /** @ignore */
-var IdentityCertificate = require('./certificate/identity-certificate.js').IdentityCertificate; /** @ignore */
 var Tpm = require('./tpm/tpm.js').Tpm; /** @ignore */
 var TpmBackEndFile = require('./tpm/tpm-back-end-file.js').TpmBackEndFile; /** @ignore */
 var TpmBackEndMemory = require('./tpm/tpm-back-end-memory.js').TpmBackEndMemory; /** @ignore */
 var SyncPromise = require('../util/sync-promise.js').SyncPromise; /** @ignore */
-var NdnCommon = require('../util/ndn-common.js').NdnCommon; /** @ignore */
-var IdentityManager = require('./identity/identity-manager.js').IdentityManager; /** @ignore */
 var CertificateV2 = require('./v2/certificate-v2.js').CertificateV2; /** @ignore */
 var SigningInfo = require('./signing-info.js').SigningInfo; /** @ignore */
 var Sha256WithRsaSignature = require('../sha256-with-rsa-signature.js').Sha256WithRsaSignature; /** @ignore */
@@ -40006,57 +33610,40 @@ var KeyType = require('./security-types.js').KeyType; /** @ignore */
 var ValidityPeriod = require('./validity-period.js').ValidityPeriod; /** @ignore */
 var SafeBag = require('./safe-bag.js').SafeBag; /** @ignore */
 var VerificationHelpers = require('./verification-helpers.js').VerificationHelpers; /** @ignore */
-var PublicKey = require('./certificate/public-key.js').PublicKey; /** @ignore */
-var NoVerifyPolicyManager = require('./policy/no-verify-policy-manager.js').NoVerifyPolicyManager;
+var PublicKey = require('./certificate/public-key.js').PublicKey;
 
 /**
- * A KeyChain provides a set of interfaces to the security library such as
- * identity management, policy configuration and packet signing and verification.
+ * KeyChain is the main class of the security library.
+ * 
+ * The KeyChain class provides a set of interfaces to the security library such
+ * as identity management and packet signing.
  * Note: This class is an experimental feature. See the API docs for more detail at
  * http://named-data.net/doc/ndn-ccl-api/key-chain.html .
  *
- * There are four forms to create a KeyChain:
+ * There are three forms to create a KeyChain:
  * KeyChain(pibLocator, tpmLocator, allowReset = false) - Create a KeyChain to
  * use the PIB and TPM defined by the given locators, which creates a security
- * v2 KeyChain that uses CertificateV2, Pib, Tpm and Validator (instead of v1
- * Certificate, IdentityStorage, PrivateKeyStorage and PolicyManager).
- * KeyChain(identityManager, policyManager = null) - Create a security v1
- * KeyChain to use the optional identityManager and policyManager.
- * KeyChain(pibImpl, tpmBackEnd, policyManager = null) - Create a security v2
- * KeyChain with explicitly-created PIB and TPM objects, and that optionally
- * still uses the v1 PolicyManager.
+ * v2 KeyChain that uses CertificateV2, Pib, Tpm and Validator.
+ * KeyChain(pibImpl, tpmBackEnd) - Create a security v2 KeyChain with
+ * explicitly-created PIB and TPM objects.
  * Finally, the default constructor KeyChain() creates a KeyChain with the
  * default PIB and TPM, which are platform-dependent and can be overridden
- * system-wide or individually by the user. The default constructor creates a
- * security v2 KeyChain that uses CertificateV2, Pib, Tpm and Validator.
- * However, if the default security v1 database file still exists, and the
- * default security v2 database file does not yet exists, then assume that the
- * system is running an older NFD and create a security v1 KeyChain with the
- * default IdentityManager and a NoVerifyPolicyManager.
+ * system-wide or individually by the user.
  * @param {string} pibLocator The PIB locator, e.g., "pib-sqlite3:/example/dir".
  * @param {string} tpmLocator The TPM locator, e.g., "tpm-memory:".
  * @param {boolean} allowReset (optional) If True, the PIB will be reset when
  * the supplied tpmLocator mismatches the one in the PIB. If omitted, don't
  * allow reset.
- * @param {IdentityManager} identityManager (optional) The identity manager as a
- * subclass of IdentityManager. If omitted, use the default IdentityManager
- * constructor.
- * @param {PolicyManager} policyManager: (optional) The policy manager as a
- * subclass of PolicyManager. If omitted, use NoVerifyPolicyManager.
  * @param {PibImpl} pibImpl An explicitly-created PIB object of a subclass of
  * PibImpl.
  * @param {TpmBackEnd} tpmBackEnd: An explicitly-created TPM object of a
  * subclass of TpmBackEnd.
- * @throws SecurityException if this is not in Node.js and this uses the default
- * IdentityManager constructor. (See IdentityManager for details.)
+ * @throws KeyChain.LocatorMismatchError if the supplied TPM locator does not
+ * match the locator stored in the PIB.
  * @constructor
  */
 var KeyChain = function KeyChain(arg1, arg2, arg3)
 {
-  this.identityManager_ = null;  // for security v1
-  this.policyManager_ = new NoVerifyPolicyManager(); // for security v1
-  this.face_ = null;             // for security v1
-
   this.pib_ = null;
   this.tpm_ = null;
 
@@ -40067,18 +33654,9 @@ var KeyChain = function KeyChain(arg1, arg2, arg3)
       throw new SecurityException(new Error
         ("KeyChain: The default KeyChain constructor is not supported in the browser"));
 
-    if (fs.existsSync(BasicIdentityStorage.getDefaultDatabaseFilePath()) &&
-       !fs.existsSync(PibSqlite3.getDefaultDatabaseFilePath())) {
-      // The security v1 SQLite file still exists and the security v2
-      //   does not yet.
-      arg1 = new IdentityManager();
-      arg2 = new NoVerifyPolicyManager();
-    }
-    else {
-      // Set the security v2 locators to default empty strings.
-      arg1 = "";
-      arg2 = "";
-    }
+    // Set the security v2 locators to default empty strings.
+    arg1 = "";
+    arg2 = "";
   }
 
   if (typeof arg1 === 'string') {
@@ -40087,8 +33665,6 @@ var KeyChain = function KeyChain(arg1, arg2, arg3)
     var allowReset = arg3;
     if (allowReset == undefined)
       allowReset = false;
-
-    this.isSecurityV1_ = false;
 
     // PIB locator.
     var pibScheme = [null];
@@ -40110,28 +33686,9 @@ var KeyChain = function KeyChain(arg1, arg2, arg3)
   else if (arg1 instanceof PibImpl) {
     var pibImpl = arg1;
     var tpmBackEnd = arg2;
-    var policyManager = arg3;
-    if (policyManager == undefined)
-      policyManager = new NoVerifyPolicyManager()
-
-    this.isSecurityV1_ = false;
-    this.policyManager_ = policyManager;
 
     this.pib_ = new Pib("", "", pibImpl);
     this.tpm_ = new Tpm("", "", tpmBackEnd);
-  }
-  else {
-    var identityManager = arg1;
-    var policyManager = arg2;
-
-    this.isSecurityV1_ = true;
-    if (identityManager == undefined)
-      identityManager = new IdentityManager();
-    if (policyManager == undefined)
-      policyManager = new NoVerifyPolicyManager();
-
-    this.identityManager_ = identityManager;
-    this.policyManager_ = policyManager;
   }
 };
 
@@ -40157,33 +33714,12 @@ KeyChain.Error.prototype.name = "KeyChainError";
 /**
  * @return {Pib}
  */
-KeyChain.prototype.getPib = function()
-{
-  if (this.isSecurityV1_)
-    throw new SecurityException(new Error
-      ("getPib is not supported for security v1"));
-
-  return this.pib_;
-};
+KeyChain.prototype.getPib = function() { return this.pib_; };
 
 /**
  * @return {Tpm}
  */
-KeyChain.prototype.getTpm = function()
-{
-  if (this.isSecurityV1_)
-    throw new SecurityException(new Error
-      ("getTpm is not supported for security v1"));
-
-  return this.tpm_;
-};
-
-/**
- * Get the flag set by the constructor if this is a security v1 or v2 KeyChain.
- * @return (boolean} True if this is a security v1 KeyChain, false if this is a
- * security v2 KeyChain.
- */
-KeyChain.prototype.getIsSecurityV1 = function() { return this.isSecurityV1_; };
+KeyChain.prototype.getTpm = function() { return this.tpm_; };
 
 // Identity management
 
@@ -40292,15 +33828,8 @@ KeyChain.prototype.createIdentityV2 = function
 };
 
 /**
- * This method has two forms:
- * deleteIdentity(identity, useSync) - Delete the PibIdentity identity. After this
- * operation, the identity is invalid.
- * deleteIdentity(identityName, useSync) - Delete the identity from the public and
- * private key storage. If the identity to be deleted is the current default s
- * system default, the method will not delete the identity and will return
- * immediately.
+ * elete the PibIdentity identity. After this operation, the identity is invalid.
  * @param {PibIdentity} identity The identity to delete.
- * @param {Name} identityName The name of the identity to delete.
  * @param {boolean} useSync (optional) If true then return a SyncPromise which
  * is already fulfilled. If omitted or false, this may return a SyncPromise or
  * an async Promise.
@@ -40310,24 +33839,6 @@ KeyChain.prototype.createIdentityV2 = function
 KeyChain.prototype.deleteIdentityPromise = function(identity, useSync)
 {
   var thisKeyChain = this;
-
-  if (identity instanceof Name) {
-    if (!this.isSecurityV1_) {
-      return this.pib_.getIdentityPromise(identity, useSync)
-      .then(function(pibIdentity) {
-        return thisKeyChain.deleteIdentityPromise(pibIdentity, useSync);
-      })
-      .catch(function(err) {
-        // Ignore errors.
-        return SyncPromise.resolve();
-      });
-
-      return;
-    }
-    else
-      return SyncPromise.reject(new KeyChain.Error(new Error
-        ("deleteIdentityPromise is not supported for security v1. Use deleteIdentity.")));
-  }
 
   var identityName = identity.getName();
   var keyNames = identity.getKeys_().getKeyNames();
@@ -40353,16 +33864,9 @@ KeyChain.prototype.deleteIdentityPromise = function(identity, useSync)
 };
 
 /**
- * This method has two forms:
- * deleteIdentity(identity, onComplete, onError) - Delete the PibIdentity
- * identity (optionally using onComplete and onError callbacks). After this
- * operation, the identity is invalid.
- * deleteIdentity(identityName, onComplete, onError) - Delete the identity from
- * the public and private key storage (optionally using onComplete and onError
- * callbacks). If the identity to be deleted is the current default system
- * default, the method will not delete the identity and will return immediately.
+ * Delete the PibIdentity identity (optionally using onComplete and onError
+ * callbacks). After this operation, the identity is invalid.
  * @param {PibIdentity} identity The identity to delete.
- * @param {Name} identityName The name of the identity to delete.
  * @param {function} onComplete (optional) This calls onComplete() when the
  * operation is complete. If omitted, do not use it. (Some database libraries
  * only use a callback, so onComplete is required to use these.)
@@ -40380,11 +33884,6 @@ KeyChain.prototype.deleteIdentityPromise = function(identity, useSync)
  */
 KeyChain.prototype.deleteIdentity = function(identity, onComplete, onError)
 {
-  if (identity instanceof Name && this.isSecurityV1_) {
-    this.identityManager_.deleteIdentity(identity, onComplete, onError);
-    return;
-  }
-
   return SyncPromise.complete(onComplete, onError,
     this.deleteIdentityPromise(identity, !onComplete));
 };
@@ -40794,9 +34293,8 @@ KeyChain.prototype.setDefaultCertificate = function
  * return a Signature object.
  * @param {SigningInfo|Name} paramsOrCertificateName (optional) If a SigningInfo,
  * it is the signing parameters. If a Name, it is the certificate name of the
- * key to use for signing. If omitted and this is a security v1 KeyChain then
- * use the IdentityManager to get the default identity. Otherwise, use the PIB
- * to get the default key of the default identity.
+ * key to use for signing. If omitted, use the PIB to get the default key of the
+ * default identity.
  * @param {WireFormat} wireFormat (optional) A WireFormat object used to encode
  * the input. If omitted, use WireFormat getDefaultWireFormat().
  * @param {boolean} useSync (optional) If true then return a SyncPromise which
@@ -40851,17 +34349,8 @@ KeyChain.prototype.signPromise = function
   .then(function() {
     if (paramsOrCertificateName == undefined) {
       // Convert sign(target) into sign(target, paramsOrCertificateName)
-      if (thisKeyChain.isSecurityV1_) {
-        return thisKeyChain.prepareDefaultCertificateNamePromise_(useSync)
-        .then(function(name) {
-          paramsOrCertificateName = name;
-          return SyncPromise.resolve();
-        });
-      }
-      else {
-        paramsOrCertificateName = KeyChain.defaultSigningInfo_;
-        return SyncPromise.resolve();
-      }
+      paramsOrCertificateName = KeyChain.defaultSigningInfo_;
+      return SyncPromise.resolve();
     }
     else
       return SyncPromise.resolve();
@@ -40870,31 +34359,18 @@ KeyChain.prototype.signPromise = function
     if (paramsOrCertificateName instanceof Name) {
       var certificateName = paramsOrCertificateName;
 
-      if (!thisKeyChain.isSecurityV1_) {
-        // Make and use a SigningInfo for backwards compatibility.
-        if (!((target instanceof Interest) || (target instanceof Data)))
-          return SyncPromise.reject(new SecurityException(new Error
+      // Make and use a SigningInfo for backwards compatibility.
+      if (!((target instanceof Interest) || (target instanceof Data)))
+        return SyncPromise.reject(new SecurityException(new Error
 ("sign(buffer, certificateName) is not supported for security v2. Use sign with SigningInfo.")));
 
-        var signingInfo = new SigningInfo();
-        signingInfo.setSigningCertificateName(certificateName);
-        return thisKeyChain.signPromise(target, signingInfo, wireFormat, useSync)
-        .catch(function(err) {
-          return SyncPromise.reject(new SecurityException(new Error
-            ("Error in sign: " + err)));
-        });
-      }
-      else {
-        if (target instanceof Interest)
-          return thisKeyChain.identityManager_.signInterestByCertificatePromise
-            (target, certificateName, wireFormat, useSync);
-        else if (target instanceof Data)
-          return thisKeyChain.identityManager_.signByCertificatePromise
-            (target, certificateName, wireFormat, useSync);
-        else
-          return thisKeyChain.identityManager_.signByCertificatePromise
-            (target, certificateName, useSync);
-      }
+      var signingInfo = new SigningInfo();
+      signingInfo.setSigningCertificateName(certificateName);
+      return thisKeyChain.signPromise(target, signingInfo, wireFormat, useSync)
+      .catch(function(err) {
+        return SyncPromise.reject(new SecurityException(new Error
+          ("Error in sign: " + err)));
+      });
     }
 
     var params = paramsOrCertificateName;
@@ -40974,9 +34450,8 @@ KeyChain.prototype.signPromise = function
  * return a Signature object.
  * @param {SigningInfo|Name} paramsOrCertificateName (optional) If a SigningInfo,
  * it is the signing parameters. If a Name, it is the certificate name of the
- * key to use for signing. If omitted and this is a security v1 KeyChain then
- * use the IdentityManager to get the default identity. Otherwise, use the PIB
- * to get the default key of the default identity.
+ * key to use for signing. If omitted, use the PIB to get the default key of the
+ * default identity.
  * @param {WireFormat} wireFormat (optional) A WireFormat object used to encode
  * the input. If omitted, use WireFormat getDefaultWireFormat().
  * @param {function} onComplete (optional) If target is a Data object, this calls
@@ -41431,69 +34906,6 @@ KeyChain.registerTpmBackend = function(scheme, makeTpmBackEnd)
   KeyChain.getTpmFactories_()[scheme] = makeTpmBackEnd;
 };
 
-// Security v1 methods
-
-/*****************************************
- *          Identity Management          *
- *****************************************/
-
-/**
- * Create an identity by creating a pair of Key-Signing-Key (KSK) for this
- * identity and a self-signed certificate of the KSK. If a key pair or
- * certificate for the identity already exists, use it.
- * @param {Name} identityName The name of the identity.
- * @param {KeyParams} params (optional) The key parameters if a key needs to be
- * generated for the identity. If omitted, use KeyChain.getDefaultKeyParams().
- * @param {function} onComplete (optional) This calls onComplete(certificateName)
- * with name of the default certificate of the identity. If omitted, the return
- * value is described below. (Some crypto libraries only use a callback, so
- * onComplete is required to use these.)
- * NOTE: The library will log any exceptions thrown by this callback, but for
- * better error handling the callback should catch and properly handle any
- * exceptions.
- * @param {function} onError (optional) If defined, then onComplete must be
- * defined and if there is an exception, then this calls onError(exception)
- * with the exception. If onComplete is defined but onError is undefined, then
- * this will log any thrown exception. (Some database libraries only use a
- * callback, so onError is required to be notified of an exception.)
- * NOTE: The library will log any exceptions thrown by this callback, but for
- * better error handling the callback should catch and properly handle any
- * exceptions.
- * @return {Name} If onComplete is omitted, return the name of the default
- * certificate of the identity. Otherwise, if onComplete is supplied then return
- * undefined and use onComplete as described above.
- */
-KeyChain.prototype.createIdentityAndCertificate = function
-  (identityName, params, onComplete, onError)
-{
-  onError = (typeof params === "function") ? onComplete : onError;
-  onComplete = (typeof params === "function") ? params : onComplete;
-  params = (typeof params === "function" || !params) ?
-    KeyChain.getDefaultKeyParams() : params;
-
-  return this.identityManager_.createIdentityAndCertificate
-    (identityName, params, onComplete, onError);
-};
-
-/**
- * Create an identity by creating a pair of Key-Signing-Key (KSK) for this
- * identity and a self-signed certificate of the KSK. If a key pair or
- * certificate for the identity already exists, use it.
- * @deprecated Use createIdentityAndCertificate which returns the
- * certificate name instead of the key name. You can use
- * IdentityCertificate.certificateNameToPublicKeyName to convert the
- * certificate name to the key name.
- * @param {Name} identityName The name of the identity.
- * @param {KeyParams} params (optional) The key parameters if a key needs to be
- * generated for the identity. If omitted, use KeyChain.getDefaultKeyParams().
- * @return {Name} The key name of the auto-generated KSK of the identity.
- */
-KeyChain.prototype.createIdentity = function(identityName, params)
-{
-  return IdentityCertificate.certificateNameToPublicKeyName
-    (this.createIdentityAndCertificate(identityName, params));
-};
-
 /**
  * Get the default identity.
  * @param {function} onComplete (optional) This calls onComplete(identityName)
@@ -41520,14 +34932,6 @@ KeyChain.prototype.createIdentity = function(identityName, params)
  */
 KeyChain.prototype.getDefaultIdentity = function(onComplete, onError)
 {
-  if (!this.isSecurityV1_) {
-    return SyncPromise.complete(onComplete, onError,
-      this.pib_.getDefaultIdentityPromise(!onComplete)
-      .then(function(pibIdentity) {
-        return SyncPromise.resolve(pibIdentity.getName());
-      }));
-  }
-
   return this.identityManager_.getDefaultIdentity(onComplete, onError);
 };
 
@@ -41559,381 +34963,17 @@ KeyChain.prototype.getDefaultIdentity = function(onComplete, onError)
  */
 KeyChain.prototype.getDefaultCertificateName = function(onComplete, onError)
 {
-  if (!this.isSecurityV1_) {
-    return SyncPromise.complete(onComplete, onError,
-      this.pib_.getDefaultIdentityPromise(!onComplete)
-      .then(function(identity) {
-        return identity.getDefaultKeyPromise(!onComplete);
-      })
-      .then(function(key) {
-        return key.getDefaultCertificatePromise(!onComplete);
-      })
-      .then(function(certificate) {
-        return SyncPromise.resolve(certificate.getName());
-      }));
-  }
-
-  return this.identityManager_.getDefaultCertificateName(onComplete, onError);
-};
-
-/**
- * Generate a pair of RSA keys for the specified identity.
- * @param {Name} identityName The name of the identity.
- * @param {boolean} isKsk (optional) true for generating a Key-Signing-Key (KSK),
- * false for a Data-Signing-Key (DSK). If omitted, generate a Data-Signing-Key.
- * @param {number} keySize (optional) The size of the key. If omitted, use a
- * default secure key size.
- * @return {Name} The generated key name.
- */
-KeyChain.prototype.generateRSAKeyPair = function(identityName, isKsk, keySize)
-{
-  if (!this.isSecurityV1_)
-    throw new SecurityException(new Error
-      ("generateRSAKeyPair is not supported for security v2. Use createIdentityV2."));
-
-  keySize = (typeof isKsk === "boolean") ? isKsk : keySize;
-  isKsk = (typeof isKsk === "boolean") ? isKsk : false;
-
-  if (!keySize)
-    keySize = 2048;
-
-  return this.identityManager_.generateRSAKeyPair(identityName, isKsk, keySize);
-};
-
-/**
- * Set a key as the default key of an identity. The identity name is inferred
- * from keyName.
- * @param {Name} keyName The name of the key.
- * @param {Name} identityNameCheck (optional) The identity name to check that the
- * keyName contains the same identity name. If an empty name, it is ignored.
- * @param {function} onComplete (optional) This calls onComplete() when complete.
- * (Some database libraries only use a callback, so onComplete is required to
- * use these.)
- * NOTE: The library will log any exceptions thrown by this callback, but for
- * better error handling the callback should catch and properly handle any
- * exceptions.
- * @param {function} onError (optional) If defined, then onComplete must be
- * defined and if there is an exception, then this calls onError(exception)
- * with the exception. If onComplete is defined but onError is undefined, then
- * this will log any thrown exception. (Some database libraries only use a
- * callback, so onError is required to be notified of an exception.)
- * NOTE: The library will log any exceptions thrown by this callback, but for
- * better error handling the callback should catch and properly handle any
- * exceptions.
- */
-KeyChain.prototype.setDefaultKeyForIdentity = function
-  (keyName, identityNameCheck, onComplete, onError)
-{
-  if (!this.isSecurityV1_)
-    return SyncPromise.complete(onComplete, onError,
-      SyncPromise.reject(new SecurityException(new Error
-        ("setDefaultKeyForIdentity is not supported for security v2. Use getPib() methods."))));
-
-  return this.identityManager_.setDefaultKeyForIdentity
-    (keyName, identityNameCheck, onComplete, onError);
-};
-
-/**
- * Generate a pair of RSA keys for the specified identity and set it as the
- * default key for the identity.
- * @param {Name} identityName The name of the identity.
- * @param {boolean} isKsk (optional) true for generating a Key-Signing-Key (KSK),
- * false for a Data-Signing-Key (DSK). If omitted, generate a Data-Signing-Key.
- * @param {number} keySize (optional) The size of the key. If omitted, use a
- * default secure key size.
- * @return {Name} The generated key name.
- */
-KeyChain.prototype.generateRSAKeyPairAsDefault = function
-  (identityName, isKsk, keySize)
-{
-  if (!this.isSecurityV1_)
-    throw new SecurityException(new Error
-      ("generateRSAKeyPairAsDefault is not supported for security v2. Use createIdentityV2."));
-
-  return this.identityManager_.generateRSAKeyPairAsDefault
-    (identityName, isKsk, keySize);
-};
-
-/**
- * Create a public key signing request.
- * @param {Name} keyName The name of the key.
- * @return {Blob} The signing request data.
- */
-KeyChain.prototype.createSigningRequest = function(keyName)
-{
-  if (!this.isSecurityV1_) {
-    var useSync = true;
-    return SyncPromise.complete(null, null,
-      this.pib_.getIdentityPromise
-        (PibKey.extractIdentityFromKeyName(keyName, useSync))
-      .then(function(identity) {
-        return identity.getKeyPromise(keyName, useSync);
-      })
-      .then(function(key) {
-        return SyncPromise.resolve(key.getPublicKey());
-      }));
-  }
-
-  return this.identityManager_.getPublicKey(keyName).getKeyDer();
-};
-
-/**
- * Install an identity certificate into the public key identity storage.
- * @param {IdentityCertificate} certificate The certificate to to added.
- * @param {function} onComplete (optional) This calls onComplete() when complete.
- * (Some database libraries only use a callback, so onComplete is required to
- * use these.)
- * NOTE: The library will log any exceptions thrown by this callback, but for
- * better error handling the callback should catch and properly handle any
- * exceptions.
- * @param {function} onError (optional) If defined, then onComplete must be
- * defined and if there is an exception, then this calls onError(exception)
- * with the exception. If onComplete is defined but onError is undefined, then
- * this will log any thrown exception. (Some database libraries only use a
- * callback, so onError is required to be notified of an exception.)
- * NOTE: The library will log any exceptions thrown by this callback, but for
- * better error handling the callback should catch and properly handle any
- * exceptions.
- */
-KeyChain.prototype.installIdentityCertificate = function
-  (certificate, onComplete, onError)
-{
-  if (!this.isSecurityV1_)
-    return SyncPromise.complete(onComplete, onError,
-      SyncPromise.reject(new SecurityException(new Error
-        ("installIdentityCertificate is not supported for security v2. Use getPib() methods."))));
-
-  this.identityManager_.addCertificate(certificate, onComplete, onError);
-};
-
-/**
- * Set the certificate as the default for its corresponding key.
- * @param {IdentityCertificate} certificate The certificate.
- * @param {function} onComplete (optional) This calls onComplete() when complete.
- * (Some database libraries only use a callback, so onComplete is required to
- * use these.)
- * NOTE: The library will log any exceptions thrown by this callback, but for
- * better error handling the callback should catch and properly handle any
- * exceptions.
- * @param {function} onError (optional) If defined, then onComplete must be
- * defined and if there is an exception, then this calls onError(exception)
- * with the exception. If onComplete is defined but onError is undefined, then
- * this will log any thrown exception. (Some database libraries only use a
- * callback, so onError is required to be notified of an exception.)
- * NOTE: The library will log any exceptions thrown by this callback, but for
- * better error handling the callback should catch and properly handle any
- * exceptions.
- */
-KeyChain.prototype.setDefaultCertificateForKey = function
-  (certificate, onComplete, onError)
-{
-  if (!this.isSecurityV1_)
-    return SyncPromise.complete(onComplete, onError,
-      SyncPromise.reject(new SecurityException(new Error
-        ("setDefaultCertificateForKey is not supported for security v2. Use getPib() methods."))));
-
-  this.identityManager_.setDefaultCertificateForKey
-    (certificate, onComplete, onError);
-};
-
-/**
- * Get a certificate which is still valid with the specified name.
- * @param {Name} certificateName The name of the requested certificate.
- * @param {function} onComplete (optional) This calls onComplete(certificate)
- * with the requested IdentityCertificate. If omitted, the return value is
- * described below. (Some crypto libraries only use a callback, so onComplete is
- * required to use these.)
- * NOTE: The library will log any exceptions thrown by this callback, but for
- * better error handling the callback should catch and properly handle any
- * exceptions.
- * @param {function} onError (optional) If defined, then onComplete must be
- * defined and if there is an exception, then this calls onError(exception)
- * with the exception. If onComplete is defined but onError is undefined, then
- * this will log any thrown exception. (Some database libraries only use a
- * callback, so onError is required to be notified of an exception.)
- * NOTE: The library will log any exceptions thrown by this callback, but for
- * better error handling the callback should catch and properly handle any
- * exceptions.
- * @return {IdentityCertificate} If onComplete is omitted, return the requested
- * certificate. Otherwise, if onComplete is supplied then return undefined and
- * use onComplete as described above.
- */
-KeyChain.prototype.getCertificate = function
-  (certificateName, onComplete, onError)
-{
-  if (!this.isSecurityV1_)
-    return SyncPromise.complete(onComplete, onError,
-      SyncPromise.reject(new SecurityException(new Error
-        ("getCertificate is not supported for security v2. Use getPib() methods."))));
-
-  return this.identityManager_.getCertificate
-    (certificateName, onComplete, onError);
-};
-
-/**
- * @deprecated Use getCertificate.
- */
-KeyChain.prototype.getIdentityCertificate = function
-  (certificateName, onComplete, onError)
-{
-  if (!this.isSecurityV1_)
-    return SyncPromise.complete(onComplete, onError,
-      SyncPromise.reject(new SecurityException(new Error
-        ("getIdentityCertificate is not supported for security v2. Use getPib() methods."))));
-
-  return this.identityManager_.getCertificate
-    (certificateName, onComplete, onError);
-};
-
-/**
- * Revoke a key.
- * @param {Name} keyName The name of the key that will be revoked.
- */
-KeyChain.prototype.revokeKey = function(keyName)
-{
-  //TODO: Implement
-};
-
-/**
- * Revoke a certificate.
- * @param {Name} certificateName The name of the certificate that will be
- * revoked.
- */
-KeyChain.prototype.revokeCertificate = function(certificateName)
-{
-  //TODO: Implement
-};
-
-/**
- * Get the identity manager given to or created by the constructor.
- * @return {IdentityManager} The identity manager.
- */
-KeyChain.prototype.getIdentityManager = function()
-{
-  if (!this.isSecurityV1_)
-    throw new SecurityException(new Error
-      ("getIdentityManager is not supported for security v2"));
-
-  return this.identityManager_;
-};
-
-/*****************************************
- *           Policy Management           *
- *****************************************/
-
-/**
- * Get the policy manager given to or created by the constructor.
- * @return {PolicyManager} The policy manager.
- */
-KeyChain.prototype.getPolicyManager = function()
-{
-  return this.policyManager_;
-};
-
-/*****************************************
- *              Sign/Verify              *
- *****************************************/
-
-/**
- * Sign the target. If it is a Data object, set its signature. If it is an
- * array, produce a signature object.
- * @param {Data|Buffer} target If this is a Data object, wire encode for
- * signing, update its signature and key locator field and wireEncoding. If it
- * is an array, sign it and return a Signature object.
- * @param {Name} identityName (optional) The identity name for the key to use for
- * signing.  If omitted, infer the signing identity from the data packet name.
- * @param {WireFormat} wireFormat (optional) A WireFormat object used to encode
- * the input. If omitted, use WireFormat getDefaultWireFormat().
- * @param {function} onComplete (optional) If target is a Data object, this calls
- * onComplete(data) with the supplied Data object which has been modified to set
- * its signature. If target is a Buffer, this calls
- * onComplete(signature) where signature is the produced Signature object. If
- * omitted, the return value is described below. (Some crypto libraries only use
- * a callback, so onComplete is required to use these.)
- * NOTE: The library will log any exceptions thrown by this callback, but for
- * better error handling the callback should catch and properly handle any
- * exceptions.
- * @param {function} onError (optional) If defined, then onComplete must be
- * defined and if there is an exception, then this calls onError(exception)
- * with the exception. If onComplete is defined but onError is undefined, then
- * this will log any thrown exception. (Some database libraries only use a
- * callback, so onError is required to be notified of an exception.)
- * NOTE: The library will log any exceptions thrown by this callback, but for
- * better error handling the callback should catch and properly handle any
- * exceptions.
- * @return {Signature} If onComplete is omitted, return the generated Signature
- * object (if target is a Buffer) or undefined (if target is Data).
- * Otherwise, if onComplete is supplied then return undefined and use onComplete
- * as described above.
- */
-KeyChain.prototype.signByIdentity = function
-  (target, identityName, wireFormat, onComplete, onError)
-{
-  onError = (typeof wireFormat === "function") ? onComplete : onError;
-  onComplete = (typeof wireFormat === "function") ? wireFormat : onComplete;
-  wireFormat = (typeof wireFormat === "function" || !wireFormat) ? WireFormat.getDefaultWireFormat() : wireFormat;
-
-  if (!this.isSecurityV1_)
-    return SyncPromise.complete(onComplete, onError,
-      SyncPromise.reject(new SecurityException(new Error
-        ("signByIdentity(buffer, identityName) is not supported for security v2. Use sign with SigningInfo."))));
-
-  var useSync = !onComplete;
-  var thisKeyChain = this;
-
-  if (identityName == null)
-    identityName = new Name();
-
-  if (target instanceof Data) {
-    var data = target;
-
-    var mainPromise = SyncPromise.resolve()
-    .then(function() {
-      if (identityName.size() == 0) {
-        var inferredIdentity = thisKeyChain.policyManager_.inferSigningIdentity
-          (data.getName());
-        if (inferredIdentity.size() == 0)
-          return thisKeyChain.identityManager_.getDefaultCertificateNamePromise
-            (useSync);
-        else
-          return thisKeyChain.identityManager_.getDefaultCertificateNameForIdentityPromise
-              (inferredIdentity, useSync);
-      }
-      else
-        return thisKeyChain.identityManager_.getDefaultCertificateNameForIdentityPromise
-          (identityName, useSync);
+  return SyncPromise.complete(onComplete, onError,
+    this.pib_.getDefaultIdentityPromise(!onComplete)
+    .then(function(identity) {
+      return identity.getDefaultKeyPromise(!onComplete);
     })
-    .then(function(signingCertificateName) {
-      if (signingCertificateName.size() == 0)
-        throw new SecurityException(new Error
-          ("No qualified certificate name found!"));
-
-      if (!thisKeyChain.policyManager_.checkSigningPolicy
-           (data.getName(), signingCertificateName))
-        throw new SecurityException(new Error
-          ("Signing Cert name does not comply with signing policy"));
-
-      return thisKeyChain.identityManager_.signByCertificatePromise
-        (data, signingCertificateName, wireFormat, useSync);
-    });
-
-    return SyncPromise.complete(onComplete, onError, mainPromise);
-  }
-  else {
-    var array = target;
-
-    return SyncPromise.complete(onComplete, onError,
-      this.identityManager_.getDefaultCertificateNameForIdentityPromise
-        (identityName, useSync)
-      .then(function(signingCertificateName) {
-        if (signingCertificateName.size() == 0)
-          throw new SecurityException(new Error
-            ("No qualified certificate name found!"));
-
-        return thisKeyChain.identityManager_.signByCertificatePromise
-          (array, signingCertificateName, wireFormat, useSync);
-      }));
-  }
+    .then(function(key) {
+      return key.getDefaultCertificatePromise(!onComplete);
+    })
+    .then(function(certificate) {
+      return SyncPromise.resolve(certificate.getName());
+    }));
 };
 
 /**
@@ -41948,142 +34988,9 @@ KeyChain.prototype.signByIdentity = function
  */
 KeyChain.prototype.signWithSha256 = function(target, wireFormat)
 {
-  if (!this.isSecurityV1_) {
-    var signingInfo = SigningInfo();
-    signingInfo.setSha256Signing();
-    this.sign(target, signingInfo, wireFormat);
-
-    return;
-  }
-
-  if (target instanceof Interest)
-    this.identityManager_.signInterestWithSha256(target, wireFormat);
-  else
-    this.identityManager_.signWithSha256(target, wireFormat);
-};
-
-/**
- * Check the signature on the Data object and call either onVerify or
- * onValidationFailed. We use callback functions because verify may fetch
- * information to check the signature.
- * @param {Data} data The Data object with the signature to check.
- * @param {function} onVerified If the signature is verified, this calls
- * onVerified(data).
- * NOTE: The library will log any exceptions thrown by this callback, but for
- * better error handling the callback should catch and properly handle any
- * exceptions.
- * @param {function} onValidationFailed If the signature check fails, this calls
- * onValidationFailed(data, reason) with the Data object and reason string.
- * NOTE: The library will log any exceptions thrown by this callback, but for
- * better error handling the callback should catch and properly handle any
- * exceptions.
- * @param {number} stepCount
- */
-KeyChain.prototype.verifyData = function
-  (data, onVerified, onValidationFailed, stepCount)
-{
-  if (stepCount == null)
-    stepCount = 0;
-
-  if (this.policyManager_.requireVerify(data)) {
-    var nextStep = this.policyManager_.checkVerificationPolicy
-      (data, stepCount, onVerified, onValidationFailed);
-    if (nextStep != null) {
-      var thisKeyChain = this;
-      this.face_.expressInterest
-        (nextStep.interest,
-         function(callbackInterest, callbackData) {
-           thisKeyChain.onCertificateData(callbackInterest, callbackData, nextStep);
-         },
-         function(callbackInterest) {
-           thisKeyChain.onCertificateInterestTimeout
-             (callbackInterest, nextStep.retry, onValidationFailed, data, nextStep);
-         });
-    }
-  }
-  else if (this.policyManager_.skipVerifyAndTrust(data)) {
-    try {
-      onVerified(data);
-    } catch (ex) {
-      console.log("Error in onVerified: " + NdnCommon.getErrorWithStackTrace(ex));
-    }
-  }
-  else {
-    try {
-      onValidationFailed
-        (data, "The packet has no verify rule but skipVerifyAndTrust is false");
-    } catch (ex) {
-      console.log("Error in onValidationFailed: " + NdnCommon.getErrorWithStackTrace(ex));
-    }
-  }
-};
-
-/**
- * Check the signature on the signed interest and call either onVerify or
- * onValidationFailed. We use callback functions because verify may fetch
- * information to check the signature.
- * @param {Interest} interest The interest with the signature to check.
- * @param {function} onVerified If the signature is verified, this calls
- * onVerified(interest).
- * NOTE: The library will log any exceptions thrown by this callback, but for
- * better error handling the callback should catch and properly handle any
- * exceptions.
- * @param {function} onValidationFailed If the signature check fails, this calls
- * onValidationFailed(interest, reason) with the Interest object and reason
- * string.
- * NOTE: The library will log any exceptions thrown by this callback, but for
- * better error handling the callback should catch and properly handle any
- * exceptions.
- */
-KeyChain.prototype.verifyInterest = function
-  (interest, onVerified, onValidationFailed, stepCount, wireFormat)
-{
-  if (stepCount == null)
-    stepCount = 0;
-  wireFormat = (wireFormat || WireFormat.getDefaultWireFormat());
-
-  if (this.policyManager_.requireVerify(interest)) {
-    var nextStep = this.policyManager_.checkVerificationPolicy
-      (interest, stepCount, onVerified, onValidationFailed, wireFormat);
-    if (nextStep != null) {
-      var thisKeyChain = this;
-      this.face_.expressInterest
-        (nextStep.interest,
-         function(callbackInterest, callbackData) {
-           thisKeyChain.onCertificateData(callbackInterest, callbackData, nextStep);
-         },
-         function(callbackInterest) {
-           thisKeyChain.onCertificateInterestTimeout
-             (callbackInterest, nextStep.retry, onValidationFailed, interest,
-              nextStep);
-         });
-    }
-  }
-  else if (this.policyManager_.skipVerifyAndTrust(interest)) {
-    try {
-      onVerified(interest);
-    } catch (ex) {
-      console.log("Error in onVerified: " + NdnCommon.getErrorWithStackTrace(ex));
-    }
-  }
-  else {
-    try {
-      onValidationFailed
-        (interest,
-         "The packet has no verify rule but skipVerifyAndTrust is false");
-    } catch (ex) {
-      console.log("Error in onValidationFailed: " + NdnCommon.getErrorWithStackTrace(ex));
-    }
-  }
-};
-
-/**
- * Set the Face which will be used to fetch required certificates.
- * @param {Face} face A pointer to the Face object.
- */
-KeyChain.prototype.setFace = function(face)
-{
-  this.face_ = face;
+  var signingInfo = SigningInfo();
+  signingInfo.setSha256Signing();
+  this.sign(target, signingInfo, wireFormat);
 };
 
 /**
@@ -42587,120 +35494,6 @@ KeyChain.prototype.signBufferPromise_ = function
   return this.tpm_.signPromise(buffer, keyName, digestAlgorithm, useSync);
 };
 
-// Private security v1 methods
-
-KeyChain.prototype.onCertificateData = function(interest, data, nextStep)
-{
-  // Try to verify the certificate (data) according to the parameters in nextStep.
-  this.verifyData
-    (data, nextStep.onVerified, nextStep.onValidationFailed, nextStep.stepCount);
-};
-
-KeyChain.prototype.onCertificateInterestTimeout = function
-  (interest, retry, onValidationFailed, originalDataOrInterest, nextStep)
-{
-  if (retry > 0) {
-    // Issue the same expressInterest as in verifyData except decrement retry.
-    var thisKeyChain = this;
-    this.face_.expressInterest
-      (interest,
-       function(callbackInterest, callbackData) {
-         thisKeyChain.onCertificateData(callbackInterest, callbackData, nextStep);
-       },
-       function(callbackInterest) {
-         thisKeyChain.onCertificateInterestTimeout
-           (callbackInterest, retry - 1, onValidationFailed,
-            originalDataOrInterest, nextStep);
-       });
-  }
-  else {
-    try {
-      onValidationFailed
-        (originalDataOrInterest, "The retry count is zero after timeout for fetching " +
-          interest.getName().toUri());
-    } catch (ex) {
-      console.log("Error in onValidationFailed: " + NdnCommon.getErrorWithStackTrace(ex));
-    }
-  }
-};
-
-/**
- * Get the default certificate from the identity storage and return its name.
- * If there is no default identity or default certificate, then create one.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise that returns the default certificate
- * name.
- */
-KeyChain.prototype.prepareDefaultCertificateNamePromise_ = function(useSync)
-{
-  var signingCertificate;
-  var thisKeyChain = this;
-  return this.identityManager_.getDefaultCertificatePromise(useSync)
-  .then(function(localCertificate) {
-    signingCertificate = localCertificate;
-    if (signingCertificate != null)
-      return SyncPromise.resolve();
-
-    // Set the default certificate and get the certificate again.
-    return thisKeyChain.setDefaultCertificatePromise_(useSync)
-    .then(function() {
-      return thisKeyChain.identityManager_.getDefaultCertificatePromise(useSync);
-    })
-    .then(function(localCertificate) {
-      signingCertificate = localCertificate;
-      return SyncPromise.resolve();
-    });
-  })
-  .then(function() {
-    return SyncPromise.resolve(signingCertificate.getName());
-  });
-}
-
-/**
- * Create the default certificate if it is not initialized. If there is no
- * default identity yet, creating a new tmp-identity.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise that resolves when the default
- * certificate is set.
- */
-KeyChain.prototype.setDefaultCertificatePromise_ = function(useSync)
-{
-  var thisKeyChain = this;
-
-  return this.identityManager_.getDefaultCertificatePromise(useSync)
-  .then(function(certificate) {
-    if (certificate != null)
-      // We already have a default certificate.
-      return SyncPromise.resolve();
-
-    var defaultIdentity;
-    return thisKeyChain.identityManager_.getDefaultIdentityPromise(useSync)
-    .then(function(localDefaultIdentity) {
-      defaultIdentity = localDefaultIdentity;
-      return SyncPromise.resolve();
-    }, function(ex) {
-      // Create a default identity name.
-      randomComponent = Crypto.randomBytes(4);
-      defaultIdentity = new Name().append("tmp-identity")
-        .append(new Blob(randomComponent, false));
-
-      return SyncPromise.resolve();
-    })
-    .then(function() {
-      return thisKeyChain.identityManager_.createIdentityAndCertificatePromise
-        (defaultIdentity, KeyChain.getDefaultKeyParams(), useSync);
-    })
-    .then(function() {
-      return thisKeyChain.identityManager_.setDefaultIdentityPromise
-        (defaultIdentity, useSync);
-    });
-  });
-};
-
 KeyChain.defaultPibLocator_ = null // string
 KeyChain.defaultTpmLocator_ = null // string
 KeyChain.pibFactories_ = null // string => MakePibImpl
@@ -42748,6 +35541,7 @@ exports.LocatorMismatchError = LocatorMismatchError;
 
 // Put these last to avoid a require loop.
 /** @ignore */
+var ConfigFile = require('../util/config-file.js').ConfigFile; /** @ignore */
 var Pib = require('./pib/pib.js').Pib; /** @ignore */
 var PibImpl = require('./pib/pib-impl.js').PibImpl; /** @ignore */
 var PibKey = require('./pib/pib-key.js').PibKey; /** @ignore */
@@ -43228,7 +36022,7 @@ var Interest = function Interest
     this.exclude_ = new ChangeCounter(typeof exclude === 'object' && exclude instanceof Exclude ?
       new Exclude(exclude) : new Exclude());
     this.childSelector_ = childSelector;
-    this.mustBeFresh_ = true;
+    this.mustBeFresh_ = false;
     this.interestLifetimeMilliseconds_ = interestLifetimeMilliseconds;
     this.forwardingHint_ = new ChangeCounter(new DelegationSet());
     this.applicationParameters_ = new Blob();
@@ -43468,7 +36262,7 @@ Interest.prototype.getChildSelector = function()
 };
 
 /**
- * Get the must be fresh flag. If not specified, the default is true.
+ * Get the must be fresh flag. If not specified, the default is false.
  * @return {boolean} The must be fresh flag.
  */
 Interest.prototype.getMustBeFresh = function()
@@ -43883,7 +36677,7 @@ Interest.prototype.setChildSelector = function(childSelector)
 /**
  * Set the MustBeFresh flag.
  * @param {boolean} mustBeFresh True if the content must be fresh, otherwise
- * false. If you do not set this flag, the default value is true.
+ * false. If you do not set this flag, the default value is false.
  * @return {Interest} This Interest so that you can chain calls to update values.
  */
 Interest.prototype.setMustBeFresh = function(mustBeFresh)
@@ -45365,6 +38159,18 @@ NetworkNack.getFirstHeader = function(lpPacket)
   return null;
 };
 /**
+ * Copyright (C) 2020 Operant Networks, Incorporated.
+ * @author: Jeff Thompson <jefft0@gmail.com>
+ *
+ * This works is based substantially on previous work as listed below:
+ *
+ * Original file: js/encoding/tlv-0_2-wire-format.js
+ * Original repository: https://github.com/named-data/ndn-js
+ *
+ * Summary of Changes: In encode/decodeEncryptedContentV2, support encryptionAlgprithm
+ *
+ * which was originally released under the LGPL license with the following rights:
+ *
  * Copyright (C) 2013-2019 Regents of the University of California.
  * @author: Jeff Thompson <jefft0@remap.ucla.edu>
  *
@@ -45403,7 +38209,6 @@ var HmacWithSha256Signature = require('../hmac-with-sha256-signature.js').HmacWi
 var DigestSha256Signature = require('../digest-sha256-signature.js').DigestSha256Signature; /** @ignore */
 var ControlParameters = require('../control-parameters.js').ControlParameters; /** @ignore */
 var NetworkNack = require('../network-nack.js').NetworkNack; /** @ignore */
-var Schedule = require('../encrypt/schedule.js').Schedule; /** @ignore */
 var IncomingFaceId = require('../lp/incoming-face-id.js').IncomingFaceId; /** @ignore */
 var CongestionMark = require('../lp/congestion-mark.js').CongestionMark; /** @ignore */
 var DecodingException = require('./decoding-exception.js').DecodingException;
@@ -46027,68 +38832,6 @@ Tlv0_2WireFormat.prototype.decodeDelegationSet = function
 };
 
 /**
- * Encode the EncryptedContent v1 in NDN-TLV and return the encoding.
- * @param {EncryptedContent} encryptedContent The EncryptedContent object to
- * encode.
- * @return {Blob} A Blob containing the encoding.
- */
-Tlv0_2WireFormat.prototype.encodeEncryptedContent = function(encryptedContent)
-{
-  var encoder = new TlvEncoder(256);
-  var saveLength = encoder.getLength();
-
-  // Encode backwards.
-  encoder.writeBlobTlv
-    (Tlv.Encrypt_EncryptedPayload, encryptedContent.getPayload().buf());
-  encoder.writeOptionalBlobTlv
-    (Tlv.Encrypt_InitialVector, encryptedContent.getInitialVector().buf());
-  // Assume the algorithmType value is the same as the TLV type.
-  encoder.writeNonNegativeIntegerTlv
-    (Tlv.Encrypt_EncryptionAlgorithm, encryptedContent.getAlgorithmType());
-  Tlv0_2WireFormat.encodeKeyLocator
-    (Tlv.KeyLocator, encryptedContent.getKeyLocator(), encoder);
-
-  encoder.writeTypeAndLength
-    (Tlv.Encrypt_EncryptedContent, encoder.getLength() - saveLength);
-
-  return new Blob(encoder.getOutput(), false);
-};
-
-/**
- * Decode input as an EncryptedContent v1 in NDN-TLV and set the fields of the
- * encryptedContent object.
- * @param {EncryptedContent} encryptedContent The EncryptedContent object
- * whose fields are updated.
- * @param {Buffer} input The buffer with the bytes to decode.
- * @param {boolean} copy (optional) If true, copy from the input when making new
- * Blob values. If false, then Blob values share memory with the input, which
- * must remain unchanged while the Blob values are used. If omitted, use true.
- */
-Tlv0_2WireFormat.prototype.decodeEncryptedContent = function
-  (encryptedContent, input, copy)
-{
-  if (copy == null)
-    copy = true;
-
-  var decoder = new TlvDecoder(input);
-  var endOffset = decoder.
-    readNestedTlvsStart(Tlv.Encrypt_EncryptedContent);
-
-  encryptedContent.clear();
-  Tlv0_2WireFormat.decodeKeyLocator
-    (Tlv.KeyLocator, encryptedContent.getKeyLocator(), decoder, copy);
-  encryptedContent.setAlgorithmType
-    (decoder.readNonNegativeIntegerTlv(Tlv.Encrypt_EncryptionAlgorithm));
-  encryptedContent.setInitialVector
-    (new Blob(decoder.readOptionalBlobTlv
-     (Tlv.Encrypt_InitialVector, endOffset), copy));
-  encryptedContent.setPayload
-    (new Blob(decoder.readBlobTlv(Tlv.Encrypt_EncryptedPayload), copy));
-
-  decoder.finishNestedTlvs(endOffset);
-};
-
-/**
  * Encode the EncryptedContent v2 (used in Name-based Access Control v2) in
  * NDN-TLV and return the encoding.
  * @param {EncryptedContent} encryptedContent The EncryptedContent object to
@@ -46101,6 +38844,8 @@ Tlv0_2WireFormat.prototype.encodeEncryptedContentV2 = function(encryptedContent)
   var saveLength = encoder.getLength();
 
   // Encode backwards.
+  encoder.writeOptionalNonNegativeIntegerTlv(
+    Tlv.Encrypt_EncryptionAlgorithm, encryptedContent.getAlgorithmType());
   if (encryptedContent.getKeyLocator().getType() == KeyLocatorType.KEYNAME)
     Tlv0_2WireFormat.encodeName
       (encryptedContent.getKeyLocator().getKeyName(), encoder);
@@ -46153,6 +38898,9 @@ Tlv0_2WireFormat.prototype.decodeEncryptedContentV2 = function
       (encryptedContent.getKeyLocator().getKeyName(), decoder, copy);
     encryptedContent.getKeyLocator().setType(KeyLocatorType.KEYNAME);
   }
+
+  encryptedContent.setAlgorithmType(decoder.readOptionalNonNegativeIntegerTlv
+    (Tlv.Encrypt_EncryptionAlgorithm, endOffset));
 
   decoder.finishNestedTlvs(endOffset);
 };
@@ -46446,9 +39194,9 @@ Tlv0_2WireFormat.encodeValidityPeriod_ = function(validityPeriod, encoder)
 
   // Encode backwards.
   encoder.writeBlobTlv(Tlv.ValidityPeriod_NotAfter,
-    new Blob(Schedule.toIsoString(validityPeriod.getNotAfter())).buf());
+    new Blob(WireFormat.toIsoString(validityPeriod.getNotAfter())).buf());
   encoder.writeBlobTlv(Tlv.ValidityPeriod_NotBefore,
-    new Blob(Schedule.toIsoString(validityPeriod.getNotBefore())).buf());
+    new Blob(WireFormat.toIsoString(validityPeriod.getNotBefore())).buf());
 
   encoder.writeTypeAndLength
     (Tlv.ValidityPeriod_ValidityPeriod, encoder.getLength() - saveLength);
@@ -46463,10 +39211,10 @@ Tlv0_2WireFormat.decodeValidityPeriod_ = function(validityPeriod, decoder)
   // Set copy false since we just immediately get the string.
   var isoString = new Blob
     (decoder.readBlobTlv(Tlv.ValidityPeriod_NotBefore), false);
-  var notBefore = Schedule.fromIsoString(isoString.toString());
+  var notBefore = WireFormat.fromIsoString(isoString.toString());
   isoString = new Blob
     (decoder.readBlobTlv(Tlv.ValidityPeriod_NotAfter), false);
-  var notAfter = Schedule.fromIsoString(isoString.toString());
+  var notAfter = WireFormat.fromIsoString(isoString.toString());
 
   validityPeriod.setPeriod(notBefore, notAfter);
 
@@ -47432,8 +40180,6 @@ InMemoryStorageRetaining.prototype.size = function()
 /** @ignore */
 var Crypto = require('../../crypto.js'); /** @ignore */
 var Blob = require('../../util/blob.js').Blob; /** @ignore */
-var DecryptKey = require('../decrypt-key.js').DecryptKey; /** @ignore */
-var EncryptKey = require('../encrypt-key.js').EncryptKey; /** @ignore */
 var EncryptAlgorithmType = require('./encrypt-params.js').EncryptAlgorithmType; /** @ignore */
 var UseSubtleCrypto = require('../../use-subtle-crypto-node.js').UseSubtleCrypto; /** @ignore */
 var SyncPromise = require('../../util/sync-promise.js').SyncPromise;
@@ -47449,30 +40195,6 @@ var AesAlgorithm = function AesAlgorithm()
 };
 
 exports.AesAlgorithm = AesAlgorithm;
-
-/**
- * Generate a new random decrypt key for AES based on the given params.
- * @param {AesKeyParams} params The key params with the key size (in bits).
- * @return {DecryptKey} The new decrypt key.
- */
-AesAlgorithm.generateKey = function(params)
-{
-  // Convert the key bit size to bytes.
-  var key = Crypto.randomBytes(params.getKeySize() / 8);
-
-  var decryptKey = new DecryptKey(new Blob(key, false));
-  return decryptKey;
-};
-
-/**
- * Derive a new encrypt key from the given decrypt key value.
- * @param {Blob} keyBits The key value of the decrypt key.
- * @return {EncryptKey} The new encrypt key.
- */
-AesAlgorithm.deriveEncryptKey = function(keyBits)
-{
-  return new EncryptKey(keyBits);
-};
 
 /**
  * Decrypt the encryptedData using the keyBits according the encrypt params.
@@ -47741,1194 +40463,18 @@ EncryptParams.prototype.setInitialVector = function(initialVector)
   return this;
 };
 /**
- * Copyright (C) 2015-2019 Regents of the University of California.
- * @author: Jeff Thompson <jefft0@remap.ucla.edu>
- * @author: From ndn-group-encrypt src/encryptor https://github.com/named-data/ndn-group-encrypt
+ * Copyright (C) 2020 Operant Networks, Incorporated.
+ * @author: Jeff Thompson <jefft0@gmail.com>
  *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU Lesser General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+ * This works is based substantially on previous work as listed below:
  *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU Lesser General Public License for more details.
+ * Original file: js/encrypt/decryptor-v2.js
+ * Original repository: https://github.com/named-data/ndn-js
  *
- * You should have received a copy of the GNU Lesser General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
- * A copy of the GNU Lesser General Public License is in the file COPYING.
- */
-
-/** @ignore */
-var Crypto = require('../../crypto.js'); /** @ignore */
-var Name = require('../../name.js').Name; /** @ignore */
-var KeyLocator = require('../../key-locator.js').KeyLocator; /** @ignore */
-var KeyLocatorType = require('../../key-locator.js').KeyLocatorType; /** @ignore */
-var TlvWireFormat = require('../../encoding/tlv-wire-format.js').TlvWireFormat; /** @ignore */
-var Blob = require('../../util/blob.js').Blob; /** @ignore */
-var AesAlgorithm = require('./aes-algorithm.js').AesAlgorithm; /** @ignore */
-var RsaAlgorithm = require('./rsa-algorithm.js').RsaAlgorithm; /** @ignore */
-var EncryptParams = require('./encrypt-params.js').EncryptParams; /** @ignore */
-var EncryptAlgorithmType = require('./encrypt-params.js').EncryptAlgorithmType; /** @ignore */
-var EncryptedContent = require('../encrypted-content.js').EncryptedContent; /** @ignore */
-var SyncPromise = require('../../util/sync-promise.js').SyncPromise;
-
-/**
- * Encryptor has static constants and utility methods for encryption, such as
- * encryptData.
- * @constructor
- */
-var Encryptor = function Encryptor(value)
-{
-};
-
-exports.Encryptor = Encryptor;
-
-Encryptor.NAME_COMPONENT_FOR = new Name.Component("FOR");
-Encryptor.NAME_COMPONENT_READ = new Name.Component("READ");
-Encryptor.NAME_COMPONENT_SAMPLE = new Name.Component("SAMPLE");
-Encryptor.NAME_COMPONENT_ACCESS = new Name.Component("ACCESS");
-Encryptor.NAME_COMPONENT_E_KEY = new Name.Component("E-KEY");
-Encryptor.NAME_COMPONENT_D_KEY = new Name.Component("D-KEY");
-Encryptor.NAME_COMPONENT_C_KEY = new Name.Component("C-KEY");
-
-/**
- * Prepare an encrypted data packet by encrypting the payload using the key
- * according to the params. In addition, this prepares the encoded
- * EncryptedContent with the encryption result using keyName and params. The
- * encoding is set as the content of the data packet. If params defines an
- * asymmetric encryption algorithm and the payload is larger than the maximum
- * plaintext size, this encrypts the payload with a symmetric key that is
- * asymmetrically encrypted and provided as a nonce in the content of the data
- * packet. The packet's /<dataName>/ is updated to be <dataName>/FOR/<keyName>.
- * @param {Data} data The data packet which is updated.
- * @param {Blob} payload The payload to encrypt.
- * @param {Name} keyName The key name for the EncryptedContent.
- * @param {Blob} key The encryption key value.
- * @param {EncryptParams} params The parameters for encryption.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise which fulfills when the data packet
- * is updated.
- */
-Encryptor.encryptDataPromise = function
-  (data, payload, keyName, key, params, useSync)
-{
-  data.getName().append(Encryptor.NAME_COMPONENT_FOR).append(keyName);
-
-  var algorithmType = params.getAlgorithmType();
-
-  if (algorithmType == EncryptAlgorithmType.AesCbc ||
-      algorithmType == EncryptAlgorithmType.AesEcb) {
-    return Encryptor.encryptSymmetricPromise_
-      (payload, key, keyName, params, useSync)
-    .then(function(content) {
-      data.setContent(content.wireEncode(TlvWireFormat.get()));
-      return SyncPromise.resolve();
-    });
-  }
-  else if (algorithmType == EncryptAlgorithmType.RsaPkcs ||
-           algorithmType == EncryptAlgorithmType.RsaOaep) {
-    // Node.js and Subtle don't have a direct way to get the maximum plain text size, so
-    // try to encrypt the payload first and catch the error if it is too big.
-    return Encryptor.encryptAsymmetricPromise_
-      (payload, key, keyName, params, useSync)
-    .then(function(content) {
-      data.setContent(content.wireEncode(TlvWireFormat.get()));
-      return SyncPromise.resolve();
-    }, function(err) {
-      // The payload is larger than the maximum plaintext size.
-      // 128-bit nonce.
-      var nonceKeyBuffer = Crypto.randomBytes(16);
-      var nonceKey = new Blob(nonceKeyBuffer, false);
-
-      var nonceKeyName = new Name(keyName);
-      nonceKeyName.append("nonce");
-
-      var symmetricParams = new EncryptParams
-        (EncryptAlgorithmType.AesCbc, AesAlgorithm.BLOCK_SIZE);
-
-      // Do encryptAsymmetric first so that, if there really is an error, we
-      // catch it right away.
-      var payloadContent;
-      return Encryptor.encryptAsymmetricPromise_
-        (nonceKey, key, keyName, params, useSync)
-      .then(function(localPayloadContent) {
-        payloadContent = localPayloadContent;
-        return Encryptor.encryptSymmetricPromise_
-          (payload, nonceKey, nonceKeyName, symmetricParams, useSync);
-      })
-      .then(function(nonceContent) {
-        var nonceContentEncoding = nonceContent.wireEncode();
-        var payloadContentEncoding = payloadContent.wireEncode();
-        var content = new Buffer
-          (nonceContentEncoding.size() + payloadContentEncoding.size());
-        payloadContentEncoding.buf().copy(content, 0);
-        nonceContentEncoding.buf().copy(content, payloadContentEncoding.size());
-
-        data.setContent(new Blob(content, false));
-        return SyncPromise.resolve();
-      });
-    });
-  }
-  else
-    return SyncPromise.reject(new Error("Unsupported encryption method"));
-};
-
-/**
- * Prepare an encrypted data packet by encrypting the payload using the key
- * according to the params. In addition, this prepares the encoded
- * EncryptedContent with the encryption result using keyName and params. The
- * encoding is set as the content of the data packet. If params defines an
- * asymmetric encryption algorithm and the payload is larger than the maximum
- * plaintext size, this encrypts the payload with a symmetric key that is
- * asymmetrically encrypted and provided as a nonce in the content of the data
- * packet.
- * @param {Data} data The data packet which is updated.
- * @param {Blob} payload The payload to encrypt.
- * @param {Name} keyName The key name for the EncryptedContent.
- * @param {Blob} key The encryption key value.
- * @param {EncryptParams} params The parameters for encryption.
- * @throws Error If encryptPromise doesn't return a SyncPromise which is
- * already fulfilled.
- */
-Encryptor.encryptData = function(data, payload, keyName, key, params)
-{
-  return SyncPromise.getValue(Encryptor.encryptDataPromise
-    (data, payload, keyName, key, params, true));
-};
-
-/**
- * Encrypt the payload using the symmetric key according to params, and return
- * an EncryptedContent.
- * @param {Blob} payload The data to encrypt.
- * @param {Blob} key The key value.
- * @param {Name} keyName The key name for the EncryptedContent key locator.
- * @param {EncryptParams} params The parameters for encryption.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise which returns a new EncryptedContent.
- */
-Encryptor.encryptSymmetricPromise_ = function
-  (payload, key, keyName, params, useSync)
-{
-  var algorithmType = params.getAlgorithmType();
-  var initialVector = params.getInitialVector();
-  var keyLocator = new KeyLocator();
-  keyLocator.setType(KeyLocatorType.KEYNAME);
-  keyLocator.setKeyName(keyName);
-
-  if (algorithmType == EncryptAlgorithmType.AesCbc ||
-      algorithmType == EncryptAlgorithmType.AesEcb) {
-    if (algorithmType == EncryptAlgorithmType.AesCbc) {
-      if (initialVector.size() != AesAlgorithm.BLOCK_SIZE)
-        return SyncPromise.reject(new Error("incorrect initial vector size"));
-    }
-
-    return AesAlgorithm.encryptPromise(key, payload, params, useSync)
-    .then(function(encryptedPayload) {
-      var result = new EncryptedContent();
-      result.setAlgorithmType(algorithmType);
-      result.setKeyLocator(keyLocator);
-      result.setPayload(encryptedPayload);
-      result.setInitialVector(initialVector);
-      return SyncPromise.resolve(result);
-    });
-  }
-  else
-    return SyncPromise.reject(new Error("Unsupported encryption method"));
-};
-
-/**
- * Encrypt the payload using the asymmetric key according to params, and
- * return an EncryptedContent.
- * @param {Blob} payload The data to encrypt. The size should be within range of
- * the key.
- * @param {Blob} key The key value.
- * @param {Name} keyName The key name for the EncryptedContent key locator.
- * @param {EncryptParams} params The parameters for encryption.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise which returns a new EncryptedContent.
- */
-Encryptor.encryptAsymmetricPromise_ = function
-  (payload, key, keyName, params, useSync)
-{
-  var algorithmType = params.getAlgorithmType();
-  var keyLocator = new KeyLocator();
-  keyLocator.setType(KeyLocatorType.KEYNAME);
-  keyLocator.setKeyName(keyName);
-
-  if (algorithmType == EncryptAlgorithmType.RsaPkcs ||
-      algorithmType == EncryptAlgorithmType.RsaOaep) {
-    return RsaAlgorithm.encryptPromise(key, payload, params, useSync)
-    .then(function(encryptedPayload) {
-      var result = new EncryptedContent();
-      result.setAlgorithmType(algorithmType);
-      result.setKeyLocator(keyLocator);
-      result.setPayload(encryptedPayload);
-      return SyncPromise.resolve(result);
-    });
-  }
-  else
-    return SyncPromise.reject(new Error("Unsupported encryption method"));
-};
-/**
- * Copyright (C) 2015-2019 Regents of the University of California.
- * @author: Jeff Thompson <jefft0@remap.ucla.edu>
- * @author: From ndn-group-encrypt src/algo/rsa https://github.com/named-data/ndn-group-encrypt
+ * Summary of Changes: Support GCK, async TPM.
  *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU Lesser General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+ * which was originally released under the LGPL license with the following rights:
  *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU Lesser General Public License for more details.
- *
- * You should have received a copy of the GNU Lesser General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
- * A copy of the GNU Lesser General Public License is in the file COPYING.
- */
-
-// (This is ported from ndn::gep::algo::Rsa, and named RsaAlgorithm because
-// "Rsa" is very short and not all the Common Client Libraries have namespaces.)
-
-/** @ignore */
-var cryptoConstants = require('crypto').constants; /** @ignore */
-var Crypto = require('../../crypto.js'); /** @ignore */
-var Blob = require('../../util/blob.js').Blob; /** @ignore */
-var DecryptKey = require('../decrypt-key.js').DecryptKey; /** @ignore */
-var EncryptKey = require('../encrypt-key.js').EncryptKey; /** @ignore */
-var EncryptAlgorithmType = require('./encrypt-params.js').EncryptAlgorithmType; /** @ignore */
-var DerNode = require('../../encoding/der/der-node.js').DerNode; /** @ignore */
-var OID = require('../../encoding/oid.js').OID; /** @ignore */
-var PrivateKeyStorage = require('../../security/identity/private-key-storage.js').PrivateKeyStorage; /** @ignore */
-var UseSubtleCrypto = require('../../use-subtle-crypto-node.js').UseSubtleCrypto; /** @ignore */
-var SyncPromise = require('../../util/sync-promise.js').SyncPromise; /** @ignore */
-var PublicKey = require('../../security/certificate/public-key.js').PublicKey; /** @ignore */
-var RsaKeypair = null;
-try {
-  // This should be installed with: sudo npm install rsa-keypair
-  RsaKeypair = require('rsa-keypair');
-}
-catch (e) {}
-
-/**
- * The RsaAlgorithm class provides static methods to manipulate keys, encrypt
- * and decrypt using RSA.
- * @note This class is an experimental feature. The API may change.
- * @constructor
- */
-var RsaAlgorithm = function RsaAlgorithm()
-{
-};
-
-exports.RsaAlgorithm = RsaAlgorithm;
-
-/**
- * Generate a new random decrypt key for RSA based on the given params.
- * @param {RsaKeyParams} params The key params with the key size (in bits).
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise which returns the new DecryptKey
- * (containing a PKCS8-encoded private key).
- */
-RsaAlgorithm.generateKeyPromise = function(params, useSync)
-{
-  if (UseSubtleCrypto() && !useSync) {
-    return crypto.subtle.generateKey
-      ({ name: "RSASSA-PKCS1-v1_5", modulusLength: params.getKeySize(),
-         publicExponent: new Uint8Array([0x01, 0x00, 0x01]),
-         hash: {name: "SHA-256"} },
-       true, ["sign", "verify"])
-    .then(function(key) {
-      // Export the private key to DER.
-      return crypto.subtle.exportKey("pkcs8", key.privateKey);
-    })
-    .then(function(pkcs8Der) {
-      return Promise.resolve(new DecryptKey
-        (new Blob(new Uint8Array(pkcs8Der), false)));
-    });
-  }
-  else {
-    if (!RsaKeypair)
-      return SyncPromise.reject(new Error
-        ("Need to install rsa-keypair: sudo npm install rsa-keypair"));
-
-    try {
-      var keyPair = RsaKeypair.generate(params.getKeySize());
-      // Get the PKCS1 private key DER from the PEM string and encode as PKCS8.
-      var privateKeyBase64 = keyPair.privateKey.toString().replace
-        ("-----BEGIN RSA PRIVATE KEY-----", "").replace
-        ("-----END RSA PRIVATE KEY-----", "");
-      var pkcs1PrivateKeyDer = new Buffer(privateKeyBase64, 'base64');
-      var privateKey = PrivateKeyStorage.encodePkcs8PrivateKey
-        (pkcs1PrivateKeyDer, new OID(PrivateKeyStorage.RSA_ENCRYPTION_OID),
-         new DerNode.DerNull()).buf();
-
-      return SyncPromise.resolve(new DecryptKey(privateKey));
-    } catch (err) {
-      return SyncPromise.reject(err);
-    }
-  }
-};
-
-/**
- * Generate a new random decrypt key for RSA based on the given params.
- * @param {RsaKeyParams} params The key params with the key size (in bits).
- * @return {DecryptKey} The new decrypt key (containing a PKCS8-encoded private
- * key).
- * @throws Error If generateKeyPromise doesn't return a SyncPromise which is
- * already fulfilled.
- */
-RsaAlgorithm.generateKey = function(params)
-{
-  return SyncPromise.getValue(RsaAlgorithm.generateKeyPromise(params, true));
-};
-
-/**
- * Derive a new encrypt key from the given decrypt key value.
- * @param {Blob} keyBits The key value of the decrypt key (PKCS8-encoded private
- * key).
- * @return {EncryptKey} The new encrypt key (DER-encoded public key).
- */
-RsaAlgorithm.deriveEncryptKey = function(keyBits)
-{
-  var rsaPrivateKeyDer = RsaAlgorithm.getRsaPrivateKeyDer(keyBits);
-
-  // Decode the PKCS #1 RSAPrivateKey.
-  var parsedNode = DerNode.parse(rsaPrivateKeyDer.buf(), 0);
-  var rsaPrivateKeyChildren = parsedNode.getChildren();
-  var modulus = rsaPrivateKeyChildren[1];
-  var publicExponent = rsaPrivateKeyChildren[2];
-
-  // Encode the PKCS #1 RSAPublicKey.
-  var rsaPublicKey = new DerNode.DerSequence();
-  rsaPublicKey.addChild(modulus);
-  rsaPublicKey.addChild(publicExponent);
-  var rsaPublicKeyDer = rsaPublicKey.encode();
-
-  // Encode the SubjectPublicKeyInfo.
-  var algorithmIdentifier = new DerNode.DerSequence();
-  algorithmIdentifier.addChild(new DerNode.DerOid(new OID
-    (PrivateKeyStorage.RSA_ENCRYPTION_OID)));
-  algorithmIdentifier.addChild(new DerNode.DerNull());
-  var publicKey = new DerNode.DerSequence();
-  publicKey.addChild(algorithmIdentifier);
-  publicKey.addChild(new DerNode.DerBitString(rsaPublicKeyDer.buf(), 0));
-
-  return new EncryptKey(publicKey.encode());
-};
-
-/**
- * Decrypt the encryptedData using the keyBits according the encrypt params.
- * @param {Blob} keyBits The key value (PKCS8-encoded private key).
- * @param {Blob} encryptedData The data to decrypt.
- * @param {EncryptParams} params This decrypts according to
- * params.getAlgorithmType().
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise which returns the decrypted Blob.
- */
-RsaAlgorithm.decryptPromise = function(keyBits, encryptedData, params, useSync)
-{
-  if (UseSubtleCrypto() && !useSync &&
-      // Crypto.subtle doesn't implement PKCS1 padding.
-      params.getAlgorithmType() != EncryptAlgorithmType.RsaPkcs) {
-    if (params.getAlgorithmType() == EncryptAlgorithmType.RsaOaep) {
-      return crypto.subtle.importKey
-        ("pkcs8", keyBits.buf(), { name: "RSA-OAEP", hash: {name: "SHA-1"} },
-         false, ["decrypt"])
-      .then(function(privateKey) {
-        return crypto.subtle.decrypt
-          ({ name: "RSA-OAEP" }, privateKey, encryptedData.buf());
-      })
-      .then(function(result) {
-        return Promise.resolve(new Blob(new Uint8Array(result), false));
-      });
-    }
-    else
-      return Promise.reject(new Error("unsupported padding scheme"));
-  }
-  else {
-    // keyBits is PKCS #8 but we need the inner RSAPrivateKey.
-    var rsaPrivateKeyDer = RsaAlgorithm.getRsaPrivateKeyDer(keyBits);
-
-    // Encode the key DER as a PEM private key as needed by Crypto.
-    var keyBase64 = rsaPrivateKeyDer.buf().toString('base64');
-    var keyPem = "-----BEGIN RSA PRIVATE KEY-----\n";
-    for (var i = 0; i < keyBase64.length; i += 64)
-      keyPem += (keyBase64.substr(i, 64) + "\n");
-    keyPem += "-----END RSA PRIVATE KEY-----";
-
-    var padding;
-    if (params.getAlgorithmType() == EncryptAlgorithmType.RsaPkcs)
-      padding = cryptoConstants.RSA_PKCS1_PADDING;
-    else if (params.getAlgorithmType() == EncryptAlgorithmType.RsaOaep)
-      padding = cryptoConstants.RSA_PKCS1_OAEP_PADDING;
-    else
-      return SyncPromise.reject(new Error("unsupported padding scheme"));
-
-    try {
-      // In Node.js, privateDecrypt requires version v0.12.
-      return SyncPromise.resolve(new Blob
-        (Crypto.privateDecrypt({ key: keyPem, padding: padding }, encryptedData.buf()),
-         false));
-    } catch (err) {
-      return SyncPromise.reject(err);
-    }
-  }
-};
-
-/**
- * Decrypt the encryptedData using the keyBits according the encrypt params.
- * @param {Blob} keyBits The key value (PKCS8-encoded private key).
- * @param {Blob} encryptedData The data to decrypt.
- * @param {EncryptParams} params This decrypts according to
- * params.getAlgorithmType().
- * @return {Blob} The decrypted data.
- * @throws Error If decryptPromise doesn't return a SyncPromise which is
- * already fulfilled.
- */
-RsaAlgorithm.decrypt = function(keyBits, encryptedData, params)
-{
-  return SyncPromise.getValue(RsaAlgorithm.decryptPromise
-    (keyBits, encryptedData, params, true));
-};
-
-/**
- * Encrypt the plainData using the keyBits according the encrypt params.
- * @param {Blob} keyBits The key value (DER-encoded public key).
- * @param {Blob} plainData The data to encrypt.
- * @param {EncryptParams} params This encrypts according to
- * params.getAlgorithmType().
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise which returns the encrypted Blob.
- */
-RsaAlgorithm.encryptPromise = function(keyBits, plainData, params, useSync)
-{
-  var publicKey;
-  try {
-    publicKey = new PublicKey(keyBits);
-  } catch (ex) {
-    return SyncPromise.reject(ex);
-  }
-
-  return publicKey.encryptPromise(plainData, params.getAlgorithmType(), useSync);
-};
-
-/**
- * Encrypt the plainData using the keyBits according the encrypt params.
- * @param {Blob} keyBits The key value (DER-encoded public key).
- * @param {Blob} plainData The data to encrypt.
- * @param {EncryptParams} params This encrypts according to
- * params.getAlgorithmType().
- * @return {Blob} The encrypted data.
- * @throws Error If encryptPromise doesn't return a SyncPromise which is
- * already fulfilled.
- */
-RsaAlgorithm.encrypt = function(keyBits, plainData, params)
-{
-  return SyncPromise.getValue(RsaAlgorithm.encryptPromise
-    (keyBits, plainData, params, true));
-};
-
-/**
- * Decode the PKCS #8 private key, check that the algorithm is RSA, and return
- * the inner RSAPrivateKey DER.
- * @param {Blob} The DER-encoded PKCS #8 private key.
- * @param {Blob} The DER-encoded RSAPrivateKey.
- */
-RsaAlgorithm.getRsaPrivateKeyDer = function(pkcs8PrivateKeyDer)
-{
-  var parsedNode = DerNode.parse(pkcs8PrivateKeyDer.buf(), 0);
-  var pkcs8Children = parsedNode.getChildren();
-  var algorithmIdChildren = DerNode.getSequence(pkcs8Children, 1).getChildren();
-  var oidString = algorithmIdChildren[0].toVal();
-
-  if (oidString != PrivateKeyStorage.RSA_ENCRYPTION_OID)
-    throw new Error("The PKCS #8 private key is not RSA_ENCRYPTION");
-
-  return pkcs8Children[2].getPayload();
-};
-/**
- * Copyright (C) 2015-2019 Regents of the University of California.
- * @author: Jeff Thompson <jefft0@remap.ucla.edu>
- * @author: From ndn-group-encrypt src/consumer-db https://github.com/named-data/ndn-group-encrypt
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU Lesser General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU Lesser General Public License for more details.
- *
- * You should have received a copy of the GNU Lesser General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
- * A copy of the GNU Lesser General Public License is in the file COPYING.
- */
-
-/** @ignore */
-var SyncPromise = require('../util/sync-promise.js').SyncPromise;
-
-/**
- * ConsumerDb is a base class the storage of decryption keys for the consumer. A
- * subclass must implement the methods. For example, see Sqlite3ConsumerDb (for
- * Nodejs) or IndexedDbConsumerDb (for the browser).
- * @note This class is an experimental feature. The API may change.
- * @constructor
- */
-var ConsumerDb = function ConsumerDb()
-{
-};
-
-exports.ConsumerDb = ConsumerDb;
-
-/**
- * Create a new ConsumerDb.Error to report an error using ConsumerDb
- * methods, wrapping the given error object.
- * Call with: throw new ConsumerDb.Error(new Error("message")).
- * @constructor
- * @param {Error} error The exception created with new Error.
- */
-ConsumerDb.Error = function ConsumerDbError(error)
-{
-  if (error) {
-    error.__proto__ = ConsumerDb.Error.prototype;
-    return error;
-  }
-};
-
-ConsumerDb.Error.prototype = new Error();
-ConsumerDb.Error.prototype.name = "ConsumerDbError";
-
-/**
- * Get the key with keyName from the database.
- * @param {Name} keyName The key name.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise that returns a Blob with the encoded
- * key (or an isNull Blob if cannot find the key with keyName), or that is
- * rejected with ConsumerDb.Error for a database error.
- */
-ConsumerDb.prototype.getKeyPromise = function(keyName, useSync)
-{
-  return SyncPromise.reject(new Error
-    ("ConsumerDb.getKeyPromise is not implemented"));
-};
-
-/**
- * Add the key with keyName and keyBlob to the database.
- * @param {Name} keyName The key name.
- * @param {Blob} keyBlob The encoded key.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise that fulfills when the key is added,
- * or that is rejected with ConsumerDb.Error if a key with the same keyName
- * already exists, or other database error.
- */
-ConsumerDb.prototype.addKeyPromise = function(keyName, keyBlob, useSync)
-{
-  return SyncPromise.reject(new Error
-    ("ConsumerDb.addKeyPromise is not implemented"));
-};
-
-/**
- * Delete the key with keyName from the database. If there is no key with
- * keyName, do nothing.
- * @param {Name} keyName The key name.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise that fulfills when the key is deleted
- * (or there is no such key), or that is rejected with ConsumerDb.Error for a
- * database error.
- */
-ConsumerDb.prototype.deleteKeyPromise = function(keyName, useSync)
-{
-  return SyncPromise.reject(new Error
-    ("ConsumerDb.addKeyPromise is not implemented"));
-};
-/**
- * Copyright (C) 2015-2019 Regents of the University of California.
- * @author: Jeff Thompson <jefft0@remap.ucla.edu>
- * @author: From ndn-group-encrypt src/consumer https://github.com/named-data/ndn-group-encrypt
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU Lesser General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU Lesser General Public License for more details.
- *
- * You should have received a copy of the GNU Lesser General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
- * A copy of the GNU Lesser General Public License is in the file COPYING.
- */
-
-/** @ignore */
-var Blob = require('../util/blob.js').Blob; /** @ignore */
-var Name = require('../name.js').Name; /** @ignore */
-var Interest = require('../interest.js').Interest; /** @ignore */
-var NetworkNack = require('../network-nack.js').NetworkNack; /** @ignore */
-var Link = require('../link.js').Link; /** @ignore */
-var EncryptedContent = require('./encrypted-content.js').EncryptedContent; /** @ignore */
-var EncryptError = require('./encrypt-error.js').EncryptError; /** @ignore */
-var EncryptParams = require('./algo/encrypt-params.js').EncryptParams; /** @ignore */
-var EncryptAlgorithmType = require('./algo/encrypt-params.js').EncryptAlgorithmType; /** @ignore */
-var RsaAlgorithm = require('./algo/rsa-algorithm.js').RsaAlgorithm; /** @ignore */
-var AesAlgorithm = require('./algo/aes-algorithm.js').AesAlgorithm; /** @ignore */
-var Encryptor = require('./algo/encryptor.js').Encryptor; /** @ignore */
-var SyncPromise = require('../util/sync-promise.js').SyncPromise; /** @ignore */
-var NdnCommon = require('../util/ndn-common.js').NdnCommon;
-
-/**
- * A Consumer manages fetched group keys used to decrypt a data packet in the
- * group-based encryption protocol.
- * Create a Consumer to use the given ConsumerDb, Face and other values.
- * @param {Face} face The face used for data packet and key fetching.
- * @param {KeyChain} keyChain The keyChain used to verify data packets.
- * @param {Name} groupName The reading group name that the consumer belongs to.
- * This makes a copy of the Name.
- * @param {Name} consumerName The identity of the consumer. This makes a copy of
- * the Name.
- * @param {ConsumerDb} database The ConsumerDb database for storing decryption
- * keys.
- * @param {Link} cKeyLink (optional) The Link object to use in Interests for
- * C-KEY retrieval. This makes a copy of the Link object. If the Link object's
- * getDelegations().size() is zero, don't use it. If omitted, don't use a Link
- * object.
- * @param {Link} dKeyLink (optional) The Link object to use in Interests for
- * D-KEY retrieval. This makes a copy of the Link object. If the Link object's
- * getDelegations().size() is zero, don't use it. If omitted, don't use a Link
- * object.
- * @note This class is an experimental feature. The API may change.
- * @constructor
- */
-var Consumer = function Consumer
-  (face, keyChain, groupName, consumerName, database, cKeyLink, dKeyLink)
-{
-  this.database_ = database;
-  this.keyChain_ = keyChain;
-  this.face_ = face;
-  this.groupName_ = new Name(groupName);
-  this.consumerName_ = new Name(consumerName);
-  this.cKeyLink_ =
-    (cKeyLink == undefined ? Consumer.NO_LINK : new Link(cKeyLink));
-  this.dKeyLink_ =
-    (dKeyLink == undefined ? Consumer.NO_LINK : new Link(dKeyLink));
-
-  // The map key is the C-KEY name URI string. The value is the encoded key Blob.
-  // (Use a string because we can't use the Name object as the key in JavaScript.)
-  this.cKeyMap_ = {};
-  // The map key is the D-KEY name URI string. The value is the encoded key Blob.
-  this.dKeyMap_ = {};
-};
-
-exports.Consumer = Consumer;
-
-/**
- * Express an Interest to fetch the content packet with contentName, and
- * decrypt it, fetching keys as needed.
- * @param {Name} contentName The name of the content packet.
- * @param {function} onConsumeComplete When the content packet is fetched and
- * decrypted, this calls onConsumeComplete(contentData, result) where
- * contentData is the fetched Data packet and result is the decrypted plain
- * text Blob.
- * NOTE: The library will log any exceptions thrown by this callback, but for
- * better error handling the callback should catch and properly handle any
- * exceptions.
- * @param {function} onError This calls onError(errorCode, message) for an error,
- * where errorCode is an error code from EncryptError.ErrorCode.
- * NOTE: The library will log any exceptions thrown by this callback, but for
- * better error handling the callback should catch and properly handle any
- * exceptions.
- * @param link {Link} (optional) The Link object to use in Interests for data
- * retrieval. This makes a copy of the Link object. If the Link object's
- * getDelegations().size() is zero, don't use it. If omitted, don't use a Link
- * object.
- */
-Consumer.prototype.consume = function
-  (contentName, onConsumeComplete, onError, link)
-{
-  if (link == undefined)
-    link = Consumer.NO_LINK;
-
-  var interest = new Interest(contentName);
-  var thisConsumer = this;
-  // Copy the Link object since the passed link may become invalid.
-  this.sendInterest_
-    (interest, 1, new Link(link),
-     function(validData) {
-       // Decrypt the content.
-       thisConsumer.decryptContent_(validData, function(plainText) {
-         try {
-           onConsumeComplete(validData, plainText);
-         } catch (ex) {
-           console.log("Error in onConsumeComplete: " + NdnCommon.getErrorWithStackTrace(ex));
-         }
-       }, onError);
-     },
-     onError);
-};
-
-/**
- * Set the group name.
- * @param {Name} groupName The reading group name that the consumer belongs to.
- * This makes a copy of the Name.
- */
-Consumer.prototype.setGroup = function(groupName)
-{
-  this.groupName_ = new Name(groupName);
-};
-
-/**
- * Add a new decryption key with keyName and keyBlob to the database.
- * @param {Name} keyName The key name.
- * @param {Blob} keyBlob The encoded key.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise that fulfills when the key is added,
- * or that is rejected with Error if the consumer name is not a prefix of the
- * key name, or ConsumerDb.Error if a key with the same keyName already exists,
- * or other database error.
- */
-Consumer.prototype.addDecryptionKeyPromise = function(keyName, keyBlob, useSync)
-{
-  if (!(this.consumerName_.match(keyName)))
-    return SyncPromise.reject(new Error
-      ("addDecryptionKey: The consumer name must be a prefix of the key name"));
-
-  return this.database_.addKeyPromise(keyName, keyBlob, useSync);
-};
-
-/**
- * Add a new decryption key with keyName and keyBlob to the database.
- * @param {Name} keyName The key name.
- * @param {Blob} keyBlob The encoded key.
- * @param {function} onComplete (optional) This calls onComplete() when the key
- * is added. (Some database libraries only use a callback, so onComplete is
- * required to use these.)
- * @param {function} onError (optional) If defined, then onComplete must be
- * defined and if there is an exception, then this calls onError(exception)
- * where exception is Error if the consumer name is not a prefix of the key
- * name, or ConsumerDb.Error if a key with the same keyName already exists,
- * or other database error. If onComplete is defined but onError is undefined,
- * then this will log any thrown exception. (Some database libraries only use a
- * callback, so onError is required to be notified of an exception.)
- */
-Consumer.prototype.addDecryptionKey = function
-  (keyName, keyBlob, onComplete, onError)
-{
-  return SyncPromise.complete(onComplete, onError,
-    this.addDecryptionKeyPromise(keyName, keyBlob, !onComplete));
-};
-
-/**
- * Consume.Error is used internally from promised-based methods to reject with
- * an error object that has the errorCode and message returned through the
- * onError callback.
- * @param {number} errorCode An error code from EncryptError.ErrorCode.
- * @param {string} message The error message.
- */
-Consumer.Error = function ConsumerError(errorCode, message)
-{
-  this.errorCode = errorCode;
-  this.message = message;
-};
-
-/**
- * If exception is a ConsumerError, then call onError with the errorCode and
- * message, otherwise call onError with ErrorCode.General.
- */
-Consumer.Error.callOnError = function(onError, exception, messagePrefix)
-{
-  if (!messagePrefix)
-    messagePrefix = "";
-
-  if (exception instanceof Consumer.Error) {
-    try {
-      onError(exception.errorCode, exception.message);
-    } catch (ex) {
-      console.log("Error in onError: " + NdnCommon.getErrorWithStackTrace(ex));
-    }
-  }
-  else {
-    try {
-      onError(EncryptError.ErrorCode.General, messagePrefix + exception);
-    } catch (ex) {
-      console.log("Error in onError: " + NdnCommon.getErrorWithStackTrace(ex));
-    }
-  }
-}
-
-/**
- * Decrypt encryptedContent using keyBits.
- * @param {Blob|EncryptedContent} encryptedContent The EncryptedContent to
- * decrypt, or a Blob which is first decoded as an EncryptedContent.
- * @param {Blob} keyBits The key value.
- * @return {Promise|SyncPromise} A promise that returns the decrypted Blob, or
- * that is rejected with Consumer.Error or other error.
- */
-Consumer.decryptPromise_ = function(encryptedContent, keyBits)
-{
-  return SyncPromise.resolve()
-  .then(function() {
-    if (typeof encryptedContent == 'object' && encryptedContent instanceof Blob) {
-      // Decode as EncryptedContent.
-      var encryptedBlob = encryptedContent;
-      encryptedContent = new EncryptedContent();
-      encryptedContent.wireDecode(encryptedBlob);
-    }
-
-    var payload = encryptedContent.getPayload();
-
-    if (encryptedContent.getAlgorithmType() == EncryptAlgorithmType.AesCbc) {
-      // Prepare the parameters.
-      var decryptParams = new EncryptParams(EncryptAlgorithmType.AesCbc);
-      decryptParams.setInitialVector(encryptedContent.getInitialVector());
-
-      // Decrypt the content.
-      return AesAlgorithm.decryptPromise(keyBits, payload, decryptParams);
-    }
-    else if (encryptedContent.getAlgorithmType() == EncryptAlgorithmType.RsaOaep) {
-      // Prepare the parameters.
-      var decryptParams = new EncryptParams(EncryptAlgorithmType.RsaOaep);
-
-      // Decrypt the content.
-      return RsaAlgorithm.decryptPromise(keyBits, payload, decryptParams);
-    }
-    else
-      return SyncPromise.reject(new Consumer.Error
-        (EncryptError.ErrorCode.UnsupportedEncryptionScheme,
-          "" + encryptedContent.getAlgorithmType()));
-  });
-};
-
-/**
- * Decrypt encryptedContent using keyBits.
- * @param {Blob|EncryptedContent} encryptedContent The EncryptedContent to
- * decrypt, or a Blob which is first decoded as an EncryptedContent.
- * @param {Blob} keyBits The key value.
- * @param {function} onPlainText When the data packet is decrypted, this calls
- * onPlainText(decryptedBlob) with the decrypted Blob.
- * @param {function} onError This calls onError(errorCode, message) for an error,
- * where errorCode is an error code from EncryptError.ErrorCode.
- */
-Consumer.decrypt_ = function(encryptedContent, keyBits, onPlainText, onError)
-{
-  Consumer.decryptPromise_(encryptedContent, keyBits)
-  .then(function(decryptedBlob) {
-    onPlainText(decryptedBlob);
-  }, function(ex) {
-    Consumer.Error.callOnError(onError, ex);
-  });
-};
-
-/**
- * Decrypt the data packet.
- * @param {Data} data The data packet. This does not verify the packet.
- * @param {function} onPlainText When the data packet is decrypted, this calls
- * onPlainText(decryptedBlob) with the decrypted Blob.
- * @param {function} onError This calls onError(errorCode, message) for an error,
- * where errorCode is an error code from EncryptError.ErrorCode.
- */
-Consumer.prototype.decryptContent_ = function(data, onPlainText, onError)
-{
-  // Get the encrypted content.
-  var dataEncryptedContent = new EncryptedContent();
-  try {
-    dataEncryptedContent.wireDecode(data.getContent());
-  } catch (ex) {
-    Consumer.Error.callOnError(onError, ex, "Error decoding EncryptedContent: ");
-    return;
-  }
-  var cKeyName = dataEncryptedContent.getKeyLocator().getKeyName();
-
-  // Check if the content key is already in the store.
-  var cKey = this.cKeyMap_[cKeyName.toUri()];
-  if (cKey)
-    this.decrypt_(dataEncryptedContent, cKey, onPlainText, onError);
-  else {
-    // Retrieve the C-KEY Data from the network.
-    var interestName = new Name(cKeyName);
-    interestName.append(Encryptor.NAME_COMPONENT_FOR).append(this.groupName_);
-    var interest = new Interest(interestName);
-    var thisConsumer = this;
-    this.sendInterest_
-      (interest, 1, this.cKeyLink_,
-       function(validCKeyData) {
-         thisConsumer.decryptCKey_(validCKeyData, function(cKeyBits) {
-           thisConsumer.cKeyMap_[cKeyName.toUri()] = cKeyBits;
-           Consumer.decrypt_
-             (dataEncryptedContent, cKeyBits, onPlainText, onError);
-         }, onError);
-       },
-       onError);
-  }
-};
-
-/**
- * Decrypt cKeyData.
- * @param {Data} cKeyData The C-KEY data packet.
- * @param {function} onPlainText When the data packet is decrypted, this calls
- * onPlainText(decryptedBlob) with the decrypted Blob.
- * @param {function} onError This calls onError(errorCode, message) for an error,
- * where errorCode is an error code from EncryptError.ErrorCode.
- */
-Consumer.prototype.decryptCKey_ = function(cKeyData, onPlainText, onError)
-{
-  // Get the encrypted content.
-  var cKeyContent = cKeyData.getContent();
-  var cKeyEncryptedContent = new EncryptedContent();
-  try {
-    cKeyEncryptedContent.wireDecode(cKeyContent);
-  } catch (ex) {
-    Consumer.Error.callOnError(onError, ex, "Error decoding EncryptedContent: ");
-    return;
-  }
-  var eKeyName = cKeyEncryptedContent.getKeyLocator().getKeyName();
-  var dKeyName = eKeyName.getPrefix(-3);
-  dKeyName.append(Encryptor.NAME_COMPONENT_D_KEY).append(eKeyName.getSubName(-2));
-
-  // Check if the decryption key is already in the store.
-  var dKey = this.dKeyMap_[dKeyName.toUri()];
-  if (dKey)
-    this.decrypt_(cKeyEncryptedContent, dKey, onPlainText, onError);
-  else {
-    // Get the D-Key Data.
-    var interestName = new Name(dKeyName);
-    interestName.append(Encryptor.NAME_COMPONENT_FOR).append(this.consumerName_);
-    var interest = new Interest(interestName);
-    var thisConsumer = this;
-    this.sendInterest_
-      (interest, 1, this.dKeyLink_,
-       function(validDKeyData) {
-         thisConsumer.decryptDKeyPromise_(validDKeyData)
-         .then(function(dKeyBits) {
-           thisConsumer.dKeyMap_[dKeyName.toUri()] = dKeyBits;
-           Consumer.decrypt_
-             (cKeyEncryptedContent, dKeyBits, onPlainText, onError);
-         }, function(ex) {
-           Consumer.Error.callOnError(onError, ex, "decryptDKey error: ");
-         });
-       },
-       onError);
-  }
-};
-
-/**
- * Decrypt dKeyData.
- * @param {Data} dKeyData The D-KEY data packet.
- * @return {Promise|SyncPromise} A promise that returns the decrypted Blob, or
- * that is rejected with Consumer.Error or other error.
- */
-Consumer.prototype.decryptDKeyPromise_ = function(dKeyData)
-{
-  var dataContent;
-  var encryptedNonce;
-  var encryptedPayloadBlob;
-  var thisConsumer = this;
-
-  return SyncPromise.resolve()
-  .then(function() {
-    // Get the encrypted content.
-    dataContent = dKeyData.getContent();
-
-    // Process the nonce.
-    // dataContent is a sequence of the two EncryptedContent.
-    encryptedNonce = new EncryptedContent();
-    encryptedNonce.wireDecode(dataContent);
-    var consumerKeyName = encryptedNonce.getKeyLocator().getKeyName();
-
-    // Get consumer decryption key.
-    return thisConsumer.getDecryptionKeyPromise_(consumerKeyName);
-  })
-  .then(function(consumerKeyBlob) {
-    if (consumerKeyBlob.size() == 0)
-      return SyncPromise.reject(new Consumer.Error
-        (EncryptError.ErrorCode.NoDecryptKey,
-         "The desired consumer decryption key in not in the database"));
-
-    // Process the D-KEY.
-    // Use the size of encryptedNonce to find the start of encryptedPayload.
-    var encryptedPayloadBuffer = dataContent.buf().slice
-      (encryptedNonce.wireEncode().size());
-    encryptedPayloadBlob = new Blob(encryptedPayloadBuffer, false);
-    if (encryptedPayloadBlob.size() == 0)
-      return SyncPromise.reject(new Consumer.Error
-        (EncryptError.ErrorCode.InvalidEncryptedFormat,
-         "The data packet does not satisfy the D-KEY packet format"));
-
-    // Decrypt the D-KEY.
-    return Consumer.decryptPromise_(encryptedNonce, consumerKeyBlob);
-  })
-  .then(function(nonceKeyBits) {
-    return Consumer.decryptPromise_(encryptedPayloadBlob, nonceKeyBits);
-  });
-};
-
-/**
- * Express the interest, call verifyData for the fetched Data packet and call
- * onVerified if verify succeeds. If verify fails, call
- * onError(EncryptError.ErrorCode.Validation, "verifyData failed"). If the
- * interest times out, re-express nRetrials times. If the interest times out
- * nRetrials times, or for a network Nack, call
- * onError(EncryptError.ErrorCode.DataRetrievalFailure, interest.getName().toUri()).
- * @param {Interest} interest The Interest to express.
- * @param {number} nRetrials The number of retrials left after a timeout.
- * @param {Link} link The Link object to use in the Interest. This does not make
- * a copy of the Link object. If the Link object's getDelegations().size() is
- * zero, don't use it.
- * @param {function} onVerified When the fetched Data packet validation
- * succeeds, this calls onVerified(data).
- * @param {function} onError This calls onError(errorCode, message) for an error,
- * where errorCode is an error code from EncryptError.ErrorCode.
- */
-Consumer.prototype.sendInterest_ = function
-  (interest, nRetrials, link, onVerified, onError)
-{
-  // Prepare the callback functions.
-  var thisConsumer = this;
-  var onData = function(contentInterest, contentData) {
-    try {
-      thisConsumer.keyChain_.verifyData
-        (contentData, onVerified,
-         function(d, reason) {
-           try {
-             onError
-               (EncryptError.ErrorCode.Validation, "verifyData failed. Reason: " +
-                reason);
-           } catch (ex) {
-             console.log("Error in onError: " + NdnCommon.getErrorWithStackTrace(ex));
-           }
-         });
-    } catch (ex) {
-      Consumer.Error.callOnError(onError, ex, "verifyData error: ");
-    }
-  };
-
-  function onNetworkNack(interest, networkNack) {
-    // We have run out of options. Report a retrieval failure.
-    try {
-      onError(EncryptError.ErrorCode.DataRetrievalFailure,
-              interest.getName().toUri());
-    } catch (ex) {
-      console.log("Error in onError: " + NdnCommon.getErrorWithStackTrace(ex));
-    }
-  }
-
-  var onTimeout = function(interest) {
-    if (nRetrials > 0)
-      thisConsumer.sendInterest_(interest, nRetrials - 1, link, onVerified, onError);
-    else
-      onNetworkNack(interest, new NetworkNack());
-  };
-
-  var request;
-  if (link.getDelegations().size() === 0)
-    // We can use the supplied interest without copying.
-    request = interest;
-  else {
-    // Copy the supplied interest and add the Link.
-    request = new Interest(interest);
-    // This will use a cached encoding if available.
-    request.setLinkWireEncoding(link.wireEncode());
-  }
-
-  try {
-    this.face_.expressInterest(request, onData, onTimeout, onNetworkNack);
-  } catch (ex) {
-    Consumer.Error.callOnError(onError, ex, "expressInterest error: ");
-  }
-};
-
-/**
- * Get the encoded blob of the decryption key with decryptionKeyName from the
- * database.
- * @param {Name} decryptionKeyName The key name.
- * @return {Promise|SyncPromise} A promise that returns a Blob with the encoded
- * key (or an isNull Blob if cannot find the key with decryptionKeyName), or
- * that is rejected with ConsumerDb.Error for a database error.
- */
-Consumer.prototype.getDecryptionKeyPromise_ = function(decryptionKeyName)
-{
-  return this.database_.getKeyPromise(decryptionKeyName);
-};
-
-Consumer.NO_LINK = new Link();
-/**
- * Copyright (C) 2015-2019 Regents of the University of California.
- * @author: Jeff Thompson <jefft0@remap.ucla.edu>
- * @author: From ndn-group-encrypt src/decrypt-key https://github.com/named-data/ndn-group-encrypt
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU Lesser General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU Lesser General Public License for more details.
- *
- * You should have received a copy of the GNU Lesser General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
- * A copy of the GNU Lesser General Public License is in the file COPYING.
- */
-
-/** @ignore */
-var Blob = require('../util/blob.js').Blob;
-
-/**
- * A DecryptKey supplies the key for decrypt.
- * Create a DecryptKey with the given key value.
- * @param {Blob|DecryptKey} value If value is another DecryptKey then copy it.
- * Otherwise, value is the key value.
- * @note This class is an experimental feature. The API may change.
- * @constructor
- */
-var DecryptKey = function DecryptKey(value)
-{
-  if (typeof value === 'object' && value instanceof DecryptKey) {
-    // Make a deep copy.
-    this.keyBits_ = value.keyBits_;
-  }
-  else {
-    var keyBits = value;
-    this.keyBits_ = typeof keyBits === 'object' && keyBits instanceof Blob ?
-      keyBits : new Blob(keyBits);
-  }
-};
-
-exports.DecryptKey = DecryptKey;
-
-/**
- * Get the key value.
- * @return {Blob} The key value.
- */
-DecryptKey.prototype.getKeyBits = function() { return this.keyBits_; };
-/**
  * Copyright (C) 2019 Regents of the University of California.
  * @author: Jeff Thompson <jefft0@remap.ucla.edu>
  * @author: From the NAC library https://github.com/named-data/name-based-access-control/blob/new/src/decryptor.cpp
@@ -48951,6 +40497,7 @@ DecryptKey.prototype.getKeyBits = function() { return this.keyBits_; };
 /** @ignore */
 var Name = require('../name.js').Name;
 var Interest = require('../interest.js').Interest;
+var Data = require('../data.js').Data;
 var EncryptError = require('./encrypt-error.js').EncryptError; /** @ignore */
 var KeyChain = require('../security/key-chain.js').KeyChain; /** @ignore */
 var SafeBag = require('../security/safe-bag.js').SafeBag; /** @ignore */
@@ -48989,7 +40536,7 @@ var DecryptorV2 = function DecryptorV2(credentialsKey, validator, keyChain, face
   this.contentKeys_ = {};
 
   this.credentialsKey_ = credentialsKey;
-  // this.validator_ = validator;
+  this.validator_ = validator;
   this.face_ = face;
   // The external keychain with access credentials.
   this.keyChain_ = keyChain;
@@ -49021,11 +40568,21 @@ DecryptorV2.prototype.shutdown = function()
 };
 
 /**
- * Asynchronously decrypt the encryptedContent.
+ * There are three forms of the decrypt method:
+ * decrypt(encryptedContent, onSuccess, onError) - Asynchronously decrypt the
+ * encryptedContent.
+ * decrypt(data, onSuccess, onError) - Asynchronously decrypt the Data packet
+ * content by decoding it as an EncryotedContent.
+ * decrypt(interest, onSuccess, onError) - Asynchronously decrypt the Interest's
+ * ApplicationParameters by decoding it as an EncryotedContent.
  * @param {EncryptedContent} encryptedContent The EncryptedContent to decrypt,
  * which must have a KeyLocator with a KEYNAME and and initial vector. This does
  * not copy the EncryptedContent object. If you may change it later, then pass
  * in a copy of the object.
+ * @param {Data} data The Data packet whose content is decoded as an
+ * EncryptdContent.
+ * @param {Interest} interest The Interest whose ApplicationParameters is
+ * decoded as an EncryptdContent.
  * @param {function} onSuccess On successful decryption, this calls
  * onSuccess(plainData) where plainData is the decrypted Blob.
  * NOTE: The library will log any exceptions thrown by this callback, but for
@@ -49038,8 +40595,41 @@ DecryptorV2.prototype.shutdown = function()
  * better error handling the callback should catch and properly handle any
  * exceptions.
  */
-DecryptorV2.prototype.decrypt = function(encryptedContent, onSuccess, onError)
+DecryptorV2.prototype.decrypt = function
+  (encryptedContentOrObject, onSuccess, onError)
 {
+  if (encryptedContentOrObject instanceof Data) {
+    var data = encryptedContentOrObject;
+
+    var encryptedContent = new EncryptedContent();
+    try {
+      encryptedContent.wireDecodeV2(data.getContent());
+    } catch (ex) {
+      onError(EncryptError.ErrorCode.DecryptionFailure,
+        "Error decoding the Data content as EncryptedContent: " + ex);
+      return;
+    }
+
+    this.decrypt(encryptedContent, onSuccess, onError);
+    return;
+  }
+  else if (encryptedContentOrObject instanceof Interest) {
+    var interest = encryptedContentOrObject;
+
+    var encryptedContent = new EncryptedContent();
+    try {
+      encryptedContent.wireDecodeV2(interest.getApplicationParameters());
+    } catch (ex) {
+      onError(EncryptError.ErrorCode.DecryptionFailure,
+        "Error decoding the Interest ApplicationParameters as EncryptedContent: " + ex);
+      return;
+    }
+
+    this.decrypt(encryptedContent, onSuccess, onError);
+    return;
+  }
+
+  var encryptedContent = encryptedContentOrObject;
   if (encryptedContent.getKeyLocator().getType() != KeyLocatorType.KEYNAME) {
     if (LOG > 3) console.log
       ("Missing required KeyLocator in the supplied EncryptedContent block");
@@ -49074,8 +40664,12 @@ DecryptorV2.prototype.decrypt = function(encryptedContent, onSuccess, onError)
       (encryptedContent, onSuccess, onError));
   }
 
-  if (isNew)
-    this.fetchCk_(ckName, contentKey, onError, EncryptorV2.N_RETRIES);
+  if (isNew) {
+    if (ckName.size() >= 2 && ckName.get(-2).equals(EncryptorV2.NAME_COMPONENT_GCK))
+      this.fetchGck_(ckName, contentKey, onError, EncryptorV2.N_RETRIES);
+    else
+      this.fetchCk_(ckName, contentKey, onError, EncryptorV2.N_RETRIES);
+  }
 };
 
 DecryptorV2.ContentKey = function DecryptorV2ContentKey()
@@ -49114,52 +40708,61 @@ DecryptorV2.prototype.fetchCk_ = function
 
   var thisDecryptor = this;
   var onData = function(ckInterest, ckData) {
-    try {
       contentKey.pendingInterest = 0;
-      // TODO: Verify that the key is legitimate.
-      var kdkPrefix = [null];
-      var kdkIdentityName = [null];
-      var kdkKeyName = [null];
-      if (!DecryptorV2.extractKdkInfoFromCkName_
-          (ckData.getName(), ckInterest.getName(), onError, kdkPrefix,
-           kdkIdentityName, kdkKeyName))
-        // The error has already been reported.
-        return;
 
-      // Check if the KDK already exists.
-      var kdkIdentity = null;
-      try {
-        // Debug: Use a Promise.
-        kdkIdentity = thisDecryptor.internalKeyChain_.getPib().getIdentity
-          (kdkIdentityName[0]);
-      } catch (ex) {
-        if (!(ex instanceof Pib.Error))
-          throw ex;
-      }
-      if (kdkIdentity != null) {
-        var kdkKey = null;
-        try {
-          // Debug: Use a Promise.
-          kdkKey = kdkIdentity.getKey(kdkKeyName[0]);
-        } catch (ex) {
-          if (!(ex instanceof Pib.Error))
-            throw ex;
-        }
-        if (kdkKey != null) {
-          // The KDK was already fetched and imported.
-          if (LOG > 3) console.log("KDK " + kdkKeyName.toUri() +
-            " already exists, so directly using it to decrypt the CK");
-          thisDecryptor.decryptCkAndProcessPendingDecrypts_
-            (contentKey, ckData, kdkKeyName[0], onError);
-          return;
-        }
-      }
+      // Validate the Data signature.
+      thisDecryptor.validator_.validate
+        (ckData,
+         function(d) {
+           try {
+             var kdkPrefix = [null];
+             var kdkIdentityName = [null];
+             var kdkKeyName = [null];
+             if (!DecryptorV2.extractKdkInfoFromCkName_
+                 (ckData.getName(), ckInterest.getName(), onError, kdkPrefix,
+                  kdkIdentityName, kdkKeyName))
+               // The error has already been reported.
+               return;
 
-      thisDecryptor.fetchKdk_
-        (contentKey, kdkPrefix[0], ckData, onError, EncryptorV2.N_RETRIES);
-    } catch (ex) {
-      onError(EncryptError.ErrorCode.General, "Error in fetchCk onData: " + ex);
-    }
+             // Check if the KDK already exists.
+             var kdkIdentity = null;
+             try {
+               // Debug: Use a Promise.
+               kdkIdentity = thisDecryptor.internalKeyChain_.getPib().getIdentity
+                 (kdkIdentityName[0]);
+             } catch (ex) {
+               if (!(ex instanceof Pib.Error))
+                 throw ex;
+             }
+             if (kdkIdentity != null) {
+               var kdkKey = null;
+               try {
+                 // Debug: Use a Promise.
+                 kdkKey = kdkIdentity.getKey(kdkKeyName[0]);
+               } catch (ex) {
+                 if (!(ex instanceof Pib.Error))
+                   throw ex;
+               }
+               if (kdkKey != null) {
+                 // The KDK was already fetched and imported.
+                 if (LOG > 3) console.log("KDK " + kdkKeyName.toUri() +
+                   " already exists, so directly using it to decrypt the CK");
+                 thisDecryptor.decryptCkAndProcessPendingDecrypts_
+                   (contentKey, ckData, kdkKeyName[0], onError);
+                 return;
+               }
+             }
+
+             thisDecryptor.fetchKdk_
+               (contentKey, kdkPrefix[0], ckData, onError, EncryptorV2.N_RETRIES);
+           } catch (ex) {
+             onError(EncryptError.ErrorCode.General, "Error in fetchCk onData: " + ex);
+           }
+         },
+         function(d, error) {
+           onError(EncryptError.ErrorCode.CkRetrievalFailure,
+             "Validate CK Data failure: " + error.toString());
+         });
   };
 
   var onTimeout = function(interest) {
@@ -49214,16 +40817,26 @@ DecryptorV2.prototype.fetchKdk_ = function
   var thisDecryptor = this;
   var onData = function(kdkInterest, kdkData) {
     contentKey.pendingInterest = 0;
-    // TODO: Verify that the key is legitimate.
 
-    var isOk = thisDecryptor.decryptAndImportKdk_(kdkData, onError);
-    if (!isOk)
-      return;
-    // This way of getting the kdkKeyName is a bit hacky.
-    var kdkKeyName = kdkPrefix.getPrefix(-2)
-      .append("KEY").append(kdkPrefix.get(-1));
-    thisDecryptor.decryptCkAndProcessPendingDecrypts_
-      (contentKey, ckData, kdkKeyName, onError);
+    // Validate the Data signature.
+    thisDecryptor.validator_.validate
+      (kdkData,
+       function(d) {
+         thisDecryptor.decryptAndImportKdk_
+           (kdkData,
+            function() {
+              // This way of getting the kdkKeyName is a bit hacky.
+              var kdkKeyName = kdkPrefix.getPrefix(-2)
+                .append("KEY").append(kdkPrefix.get(-1));
+              thisDecryptor.decryptCkAndProcessPendingDecrypts_
+                (contentKey, ckData, kdkKeyName, onError);
+            },
+            onError);
+       },
+       function(d, error) {
+         onError(EncryptError.ErrorCode.CkRetrievalFailure,
+           "Validate KDK Data failure: " + error.toString());
+       });
   };
 
   var onTimeout = function(interest) {
@@ -49254,37 +40867,117 @@ DecryptorV2.prototype.fetchKdk_ = function
 
 /**
  * @param {Data} kdkData
+ * @param {function} onSuccess On successful decryption, this calls onSuccess().
  * @param {function} onError On error, this calls onError(errorCode, message).
  * @returns {boolean} True for success, false for error (where this has called 
  * onError).
  */
-DecryptorV2.prototype.decryptAndImportKdk_ = function(kdkData, onError)
+DecryptorV2.prototype.decryptAndImportKdk_ = function(kdkData, onSuccess, onError)
 {
-  try {
-    if (LOG > 3) console.log("Decrypting and importing KDK " +
-      kdkData.getName().toUri());
-    var encryptedContent = new EncryptedContent();
-    encryptedContent.wireDecodeV2(kdkData.getContent());
+  if (LOG > 3) console.log("Decrypting and importing KDK " +
+    kdkData.getName().toUri());
+  var encryptedContent = new EncryptedContent();
+  encryptedContent.wireDecodeV2(kdkData.getContent());
 
-    var safeBag = new SafeBag(encryptedContent.getPayload());
-    // Debug: Use a Promise.
-    var secret = SyncPromise.getValue(this.keyChain_.getTpm().decryptPromise
-      (encryptedContent.getPayloadKey().buf(), this.credentialsKey_.getName(), true));
+  var safeBag = new SafeBag(encryptedContent.getPayload());
+  var thisDecryptor = this;
+  this.keyChain_.getTpm().decryptPromise
+    (encryptedContent.getPayloadKey().buf(), this.credentialsKey_.getName())
+  .then(function(secret) {
     if (secret.isNull()) {
       onError(EncryptError.ErrorCode.TpmKeyNotFound,
          "Could not decrypt secret, " + this.credentialsKey_.getName().toUri() +
          " not found in TPM");
-      return false;
+      return SyncPromise.resolve();
     }
 
-    this.internalKeyChain_.importSafeBag(safeBag, secret.buf());
-    return true;
-  } catch (ex) {
+    thisDecryptor.internalKeyChain_.importSafeBag(safeBag, secret.buf());
+    onSuccess();
+    return SyncPromise.resolve();
+  })
+  .catch(function(err) {
     // This can be EncodingException, Pib.Error, Tpm.Error, or a bunch of
     // other runtime-derived errors.
     onError(EncryptError.ErrorCode.DecryptionFailure,
-       "Failed to decrypt KDK [" + kdkData.getName().toUri() + "]: " + ex);
-    return false;
+      "Failed to decrypt KDK [" + kdkData.getName().toUri() + "]: " + err);
+  });
+};
+
+/**
+ * Fetch the encrypted group content key by appending ckName with
+ * /ENCRYPTED-BY/<credential-identity>/KEY/<key-id> . When received, call
+ * decryptCkAndProcessPendingDecrypts().
+ * @param {Name} ckName The Name from the KeyLocator of the EncryptedContent.
+ * Assume this has GCK instead of CK.
+ * @param {DecryptorV2.ContentKey} contentKey The ContentKey for storing the
+ * content key bits (passed to decryptCkAndProcessPendingDecrypts()).
+ * @param {function} onError On failure, this calls onError(errorCode, message)
+ * where errorCode is from EncryptError::ErrorCode, and message is an error
+ * string.
+ * @param {number} nTriesLeft If fetching times out, decrement nTriesLeft and
+ * try again until it is zero.
+ */
+DecryptorV2.prototype.fetchGck_ = function
+  (ckName, contentKey, onError, nTriesLeft)
+{
+  // <whatever-prefix>/GCK/<ck-id>  /ENCRYPTED-BY /<credential-identity>/KEY/<key-id>
+  // \                           /                \                                 /
+  //  -----------  --------------                  ----------------  ---------------
+  //             \/                                                \/
+  //   from the encrypted data                             from configuration
+
+  var encryptedGckName = new Name(ckName);
+  encryptedGckName
+    .append(EncryptorV2.NAME_COMPONENT_ENCRYPTED_BY)
+    .append(this.credentialsKey_.getName());
+
+  if (LOG > 3) console.log("DecryptorV2: Fetching GCK " + encryptedGckName.toUri());
+
+  // Prepare the callbacks.
+  var thisDecryptor = this;
+  var onData = function(ckInterest, ckData) {
+    try {
+      contentKey.pendingInterest = 0;
+
+      // Validate the Data signature.
+      thisDecryptor.validator_.validate
+        (ckData,
+         function(d) {
+           // Pass an empty kdkKeyName so that we decrypt with the credentialsKey_.
+           thisDecryptor.decryptCkAndProcessPendingDecrypts_
+             (contentKey, ckData, new Name(), onError);
+         },
+         function(d, error) {
+           onError(EncryptError.ErrorCode.CkRetrievalFailure,
+             "Validate GCK Data failure: " + error.toString());
+         });
+    } catch (ex) {
+      onError(EncryptError.ErrorCode.General, "Error in fetchGck onData: " + ex);
+    }
+  };
+
+  var onTimeout = function(interest) {
+    contentKey.pendingInterest = 0;
+    if (nTriesLeft > 1)
+      thisDecryptor.fetchGck_(ckName, contentKey, onError, nTriesLeft - 1);
+    else
+      onError(EncryptError.ErrorCode.CkRetrievalTimeout,
+        "Retrieval of GCK [" + interest.getName().toUri() + "] timed out");
+  };
+
+  var onNetworkNack = function(interest, networkNack) {
+    contentKey.pendingInterest = 0;
+    onError(EncryptError.ErrorCode.CkRetrievalFailure,
+      "Retrieval of GCK [" + interest.getName().toUri() +
+      "] failed. Got NACK (" + networkNack.getReason() + ")");
+  };
+
+  try {
+    contentKey.pendingInterest = this.face_.expressInterest
+      (new Interest(encryptedGckName).setMustBeFresh(false).setCanBePrefix(true),
+       onData, onTimeout, onNetworkNack);
+  } catch (ex) {
+    onError(EncryptError.ErrorCode.General, "expressInterest error: " + ex);
   }
 };
 
@@ -49308,36 +41001,61 @@ DecryptorV2.prototype.decryptCkAndProcessPendingDecrypts_ = function
     return;
   }
 
-  var ckBits;
-  try {
-    // Debug: Use a Promise.
-    ckBits = SyncPromise.getValue(this.internalKeyChain_.getTpm().decryptPromise
-      (content.getPayload().buf(), kdkKeyName, true));
-  } catch (ex) {
-    // We don't expect this from the in-memory KeyChain.
-    onError(EncryptError.ErrorCode.DecryptionFailure,
-      "Error decrypting the CK EncryptedContent " + ex);
-    return;
+  function processPendingDecrypts(ckBits) {
+    contentKey.bits = ckBits;
+    contentKey.isRetrieved = true;
+
+    for (var i in contentKey.pendingDecrypts) {
+      var pendingDecrypt = contentKey.pendingDecrypts[i];
+      // TODO: If this calls onError, should we quit?
+      DecryptorV2.doDecrypt_
+        (pendingDecrypt.encryptedContent, contentKey.bits,
+         pendingDecrypt.onSuccess, pendingDecrypt.onError);
+    }
+
+    contentKey.pendingDecrypts = [];
   }
 
-  if (ckBits.isNull()) {
-    onError(EncryptError.ErrorCode.TpmKeyNotFound,
-      "Could not decrypt secret, " + kdkKeyName.toUri() + " not found in TPM");
-    return;
+  if (kdkKeyName.size() == 0) {
+    // Assume this is a group content key encrypted directly with credentialsKey_.
+    var thisDecryptor = this;
+    this.keyChain_.getTpm().decryptPromise
+      (content.getPayload().buf(), this.credentialsKey_.getName())
+    .then(function(ckBits) {
+      if (ckBits.isNull()) {
+        onError(EncryptError.ErrorCode.TpmKeyNotFound,
+          "Could not decrypt secret, " + thisDecryptor.credentialsKey_.getName().toUri() +
+          " not found in TPM");
+        return SyncPromise.resolve();
+      }
+
+      processPendingDecrypts(ckBits);
+      return SyncPromise.resolve();
+    })
+    .catch(function(err) {
+      onError(EncryptError.ErrorCode.DecryptionFailure,
+        "Error decrypting the GCK " + err);
+    });
   }
+  else {
+    this.internalKeyChain_.getTpm().decryptPromise
+      (content.getPayload().buf(), kdkKeyName)
+    .then(function(ckBits) {
+      if (ckBits.isNull()) {
+        onError(EncryptError.ErrorCode.TpmKeyNotFound,
+          "Could not decrypt secret, " + kdkKeyName.toUri() + " not found in TPM");
+        return SyncPromise.resolve();
+      }
 
-  contentKey.bits = ckBits;
-  contentKey.isRetrieved = true;
-
-  for (var i in contentKey.pendingDecrypts) {
-    var pendingDecrypt = contentKey.pendingDecrypts[i];
-    // TODO: If this calls onError, should we quit?
-    DecryptorV2.doDecrypt_
-      (pendingDecrypt.encryptedContent, contentKey.bits,
-       pendingDecrypt.onSuccess, pendingDecrypt.onError);
+      processPendingDecrypts(ckBits);
+      return SyncPromise.resolve();
+    })
+    .catch(function(err) {
+      // We don't expect this from the in-memory KeyChain.
+      onError(EncryptError.ErrorCode.DecryptionFailure,
+        "Error decrypting the CK EncryptedContent " + err);
+    });
   }
-
-  contentKey.pendingDecrypts = [];
 };
 
 /**
@@ -49492,57 +41210,6 @@ EncryptError.ErrorCode = {
   NoDecryptKey:                1034,
   DataRetrievalFailure:        1036
 };
-/**
- * Copyright (C) 2015-2019 Regents of the University of California.
- * @author: Jeff Thompson <jefft0@remap.ucla.edu>
- * @author: From ndn-group-encrypt src/encrypt-key https://github.com/named-data/ndn-group-encrypt
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU Lesser General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU Lesser General Public License for more details.
- *
- * You should have received a copy of the GNU Lesser General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
- * A copy of the GNU Lesser General Public License is in the file COPYING.
- */
-
-/** @ignore */
-var Blob = require('../util/blob.js').Blob;
-
-/**
- * An EncryptKey supplies the key for encrypt.
- * Create an EncryptKey with the given key value.
- * @param {Blob|EncryptKey} value If value is another EncryptKey then copy it.
- * Otherwise, value is the key value.
- * @note This class is an experimental feature. The API may change.
- * @constructor
- */
-var EncryptKey = function EncryptKey(value)
-{
-  if (typeof value === 'object' && value instanceof EncryptKey) {
-    // Make a deep copy.
-    this.keyBits_ = value.keyBits_;
-  }
-  else {
-    var keyBits = value;
-    this.keyBits_ = typeof keyBits === 'object' && keyBits instanceof Blob ?
-      keyBits : new Blob(keyBits);
-  }
-};
-
-exports.EncryptKey = EncryptKey;
-
-/**
- * Get the key value.
- * @return {Blob} The key value.
- */
-EncryptKey.prototype.getKeyBits = function() { return this.keyBits_; };
 /**
  * Copyright (C) 2015-2019 Regents of the University of California.
  * @author: Jeff Thompson <jefft0@remap.ucla.edu>
@@ -49816,6 +41483,18 @@ EncryptedContent.prototype.wireDecodeV2 = function(input, wireFormat)
     wireFormat.decodeEncryptedContentV2(this, input, true);
 };
 /**
+ * Copyright (C) 2020 Operant Networks, Incorporated.
+ * @author: Jeff Thompson <jefft0@gmail.com>
+ *
+ * This works is based substantially on previous work as listed below:
+ *
+ * Original file: js/encrypt/encryptor-v2.js
+ * Original repository: https://github.com/named-data/ndn-js
+ *
+ * Summary of Changes: Support GCK, async TPM.
+ *
+ * which was originally released under the LGPL license with the following rights:
+ *
  * Copyright (C) 2019 Regents of the University of California.
  * @author: Jeff Thompson <jefft0@remap.ucla.edu>
  * @author: From the NAC library https://github.com/named-data/name-based-access-control/blob/new/src/encryptor.cpp
@@ -49850,15 +41529,22 @@ var EncryptAlgorithmType = require('./algo/encrypt-params.js').EncryptAlgorithmT
 var AesAlgorithm = require('./algo/aes-algorithm.js').AesAlgorithm; /** @ignore */
 var NdnCommon = require('../util/ndn-common.js').NdnCommon; /** @ignore */
 var EncryptError = require('./encrypt-error.js').EncryptError; /** @ignore */
+var WireFormat = require('../encoding/wire-format.js').WireFormat; /** @ignore */
+var SyncPromise = require('../util/sync-promise.js').SyncPromise; /** @ignore */
 var LOG = require('../log.js').Log.LOG;
 
 /**
  * EncryptorV2 encrypts the requested content for name-based access control (NAC)
  * using security v2. For the meaning of "KEK", etc. see:
  * https://github.com/named-data/name-based-access-control/blob/new/docs/spec.rst
- * 
- * Create an EncryptorV2 with the given parameters. This uses the face to
- * register to receive Interests for the prefix {ckPrefix}/CK.
+ *
+ * There are two forms of the constructor:
+ * EncryptorV2(accessPrefix, ckPrefix, ckDataSigningInfo, onError, validator, keyChain, face) -
+ * Create an EncryptorV2 for encrypting using a group KEK and KDKs. This uses
+ * the face to register to receive Interests for the prefix {ckPrefix}/CK.
+ * EncryptorV2(accessPrefix, onError, credentialsKey, validator, keyChain, face) -
+ * Create an EncryptorV2 for encrypting using a group content key (GCK) which
+ * is provided by the access manager.
  * @param {Name} accessPrefix The NAC prefix to fetch the Key Encryption Key
  * (KEK) (e.g., /access/prefix/NAC/data/subset). This copies the Name.
  * @param {Name} ckPrefix The prefix under which Content Keys (CK) will be
@@ -49875,6 +41561,8 @@ var LOG = require('../log.js').Log.LOG;
  * NOTE: The library will log any exceptions thrown by this callback, but for
  * better error handling the callback should catch and properly handle any
  * exceptions.
+ * @param {PibKey} credentialsKey The credentials key to be used to retrieve and
+ * decrypt the GCK.
  * @param {Validator} validator The validation policy to ensure correctness of
  * the KEK.
  * @param {KeyChain} keyChain The KeyChain used to sign Data packets.
@@ -49884,22 +41572,68 @@ var LOG = require('../log.js').Log.LOG;
 var EncryptorV2 = function EncryptorV2
   (accessPrefix, ckPrefix, ckDataSigningInfo, onError, validator, keyChain, face)
 {
+  var credentialsKey = null;
+  if (typeof ckPrefix === 'function') {
+    // This is the GCK constructor:
+    // EncryptorV2(accessPrefix, onError, credentialsKey, validator, keyChain, face).
+    var arg2 = ckPrefix;
+    var arg3 = ckDataSigningInfo;
+    var arg4 = onError;
+    var arg5 = validator;
+    var arg6 = keyChain;
+    onError = arg2;
+    credentialsKey = arg3;
+    validator = arg4;
+    keyChain = arg5;
+    face = arg6;
+  }
+
   // Copy the Name.
   this.accessPrefix_ = new Name(accessPrefix);
-  this.ckPrefix_ = new Name(ckPrefix);
-  // ckBits_ will be set by regenerateCk().
-  this.ckBits_ = null;
-  this.ckDataSigningInfo_ = new SigningInfo(ckDataSigningInfo);
-  this.isKekRetrievalInProgress_ = false;
+  // Generated CK name or fetched GCK name.
+  this.ckName_ = new Name();
+  // Generated CK (set by regenerateCk) or fetched GCK bits.
+  this.ckBits_ = Buffer.alloc(EncryptorV2.AES_KEY_SIZE);
   this.onError_ = onError;
+
+  // For creating CK Data packets. Not used for GCK.
+  this.ckPrefix_ = new Name(ckPrefix);
+  this.isKekRetrievalInProgress_ = false;
+  this.kekData_ = null;
+  this.ckDataSigningInfo_ = new SigningInfo(ckDataSigningInfo);
+
+  // Storage for encrypted CKs. Not used for GCK.
+  this.storage_ = new InMemoryStorageRetaining();
+  this.ckRegisteredPrefixId_ = 0;
+  this.kekPendingInterestId_ = 0;
+
+  // For fetching and decrypting the GCK. Not used for CK.
+  this.checkForNewGckIntervalMilliseconds_ = 60.0 * 1000;
+  this.nextCheckForNewGck_ = 0;
+  this.gckLatestPrefix_ = new Name();
+  this.isGckRetrievalInProgress_ = false;
+  this.gckPendingInterestId_ = 0;
+  this.pendingEncrypts_ = [];
+  this.credentialsKey_ = credentialsKey;
+
+  this.validator_ = validator;
   this.keyChain_ = keyChain;
   this.face_ = face;
 
-  this.kekData_ = null;
-  // Storage for encrypted CKs.
-  this.storage_ = new InMemoryStorageRetaining();
-  this.kekPendingInterestId_ = 0;
+  if (credentialsKey != null)
+    // Using GCK.
+    this.gckLatestPrefix_ = new Name(this.accessPrefix_)
+      .append(EncryptorV2.NAME_COMPONENT_GCK)
+      .append(EncryptorV2.NAME_COMPONENT_LATEST);
+  else
+    this.initializeCk_();
+};
 
+/*
+ * Complete the work of the constructor for a (non-group) content key.
+ */
+EncryptorV2.prototype.initializeCk_ = function()
+{
   this.regenerateCk();
 
   var thisEncryptor = this;
@@ -49926,7 +41660,7 @@ var EncryptorV2 = function EncryptorV2
   };
 
   this.ckRegisteredPrefixId_ = this.face_.registerPrefix
-    (new Name(ckPrefix).append(EncryptorV2.NAME_COMPONENT_CK),
+    (new Name(this.ckPrefix_).append(EncryptorV2.NAME_COMPONENT_CK),
      onInterest, onRegisterFailed);
 };
 
@@ -49937,16 +41671,102 @@ EncryptorV2.prototype.shutdown = function()
   this.face_.unsetInterestFilter(this.ckRegisteredPrefixId_);
   if (this.kekPendingInterestId_ > 0)
     this.face_.removePendingInterest(this.kekPendingInterestId_);
+  if (this.gckPendingInterestId_ > 0)
+    this.face_.removePendingInterest(this.gckPendingInterestId_);
 };
 
 /**
- * Encrypt the plainData using the existing Content Key (CK) and return a new
- * EncryptedContent.
+ * There are four forms of the encrypt method:
+ * encrypt(plainData) - Encrypt the plainData using the existing content key and
+ * return a new EncryptedContent.
+ * encrypt(plainData, onSuccess, onError) - Encrypt the plainData using the
+ * existing content key and call the onSuccess callback with a new
+ * EncryptedContent. On successful encryption, this calls
+ * onSuccess(encryptedContent) where encryptedContent is the new
+ * EncryptedContent. If this EncryptorV2 is using a group content key (GCK) then
+ * this may fetch a new GCK before calling the onSuccess callback.
+ * encrypt(data, onSuccess, onError) - Encrypt the Data packet content using the
+ * existing content key and replace the content with the wire encoding of the
+ * new EncryptedContent. On successful encryption, this calls
+ * onSuccess(data, encryptedContent) where data is the the modified Data object
+ * that was provided, and encryptedContent is the new EncryptedContent whose
+ * encoding replaced the Data packet content. If this EncryptorV2 is using a 
+ * group content key (GCK) then this may fetch a new GCK before calling the
+ * onSuccess callback.
+ * encrypt(interest, onSuccess, onError) - Encrypt the Interest
+ * ApplicationParameters using the existing content key and replace the
+ * ApplicationParameters with the wire encoding of the new EncryptedContent. On 
+ * successful encryption, this calls onSuccess(interest, encryptedContent) where 
+ * interest is the the modified Interest object that was provided, and 
+ * encryptedContent is the new EncryptedContent whose encoding replaced the 
+ * Interest ApplicationParameters. If this EncryptorV2 is using a group content
+ * key (GCK) then this may fetch a new GCK before calling the onSuccess
+ * callback. This appends a ParametersSha256Digest component to the Interest
+ * name.
  * @param {Buffer|Blob} plainData The data to encrypt.
- * @return {EncryptedContent} The new EncryptedContent.
+ * @param {Data} data The Data packet whose content is encrypted and replaced
+ * with a new EncryptedContent. (This is also passed to the onSuccess callback.)
+ * @param {Interest} interest The Interest whose ApplicationParameters is
+ * encrypted and replaced with a new EncryptedContent. (This is also passed to
+ * the onSuccess callback.)
+ * @param {function} onSuccess On successful encryption, this calls the
+ * onSuccess callback as decribed above.
+ * NOTE: The library will log any exceptions thrown by this callback, but for
+ * better error handling the callback should catch and properly handle any
+ * exceptions.
+ * @param {function} onError (optional) On failure, this calls
+ * onError(errorCode, message) where errorCode is from EncryptError.ErrorCode,
+ * and message is an error string. If omitted, call the onError given to the
+ * constructor. (Even though the constructor has an onError, this is provided
+ * separately since this asynchronous method completes either by calling
+ * onSuccess or onError.)
+ * NOTE: The library will log any exceptions thrown by this callback, but for
+ * better error handling the callback should catch and properly handle any
+ * exceptions.
+ * @return {EncryptedContent} (only for encrypt(plainData)) The new EncryptedContent.
  */
-EncryptorV2.prototype.encrypt = function(plainData)
+EncryptorV2.prototype.encrypt = function(plainData, onSuccess, onError)
 {
+  if (typeof onSuccess === 'function') {
+    if (plainData instanceof Data) {
+      var data = plainData;
+
+      this.encrypt
+        (data.getContent(),
+         function(encryptedContent) {
+           data.setContent(encryptedContent.wireEncodeV2());
+           onSuccess(data, encryptedContent);
+         },
+         onError);
+    }
+    else if (plainData instanceof Interest) {
+      var interest = plainData;
+
+      if (interest.getName().findParametersSha256Digest() != -1) {
+        onError(EncryptError.ErrorCode.EncryptionFailure,
+          "The Interest name already has a ParametersSha256Digest component: " +
+          interest.getName().toUri());
+        return;
+      }
+
+      this.encrypt
+        (interest.getApplicationParameters(),
+         function(encryptedContent) {
+           interest.setApplicationParameters(encryptedContent.wireEncodeV2());
+           interest.appendParametersDigestToName();
+           onSuccess(interest, encryptedContent);
+         },
+         onError);
+    }
+    else
+      this.encryptSync_(plainData, onSuccess, onError);
+
+    return;
+  }
+
+  if (this.isUsingGck_() && this.ckName_.size() == 0)
+    throw new Error("EncryptorV2 has not fetched the first group content key (GCK)");
+
   // Generate the initial vector.
   var initialVector = Crypto.randomBytes(EncryptorV2.AES_IV_SIZE);
 
@@ -49966,12 +41786,58 @@ EncryptorV2.prototype.encrypt = function(plainData)
   return content;
 };
 
+EncryptorV2.prototype.encryptSync_ = function(plainData, onSuccess, onError)
+{
+  // If the given OnError is omitted, use the one given to the constructor.
+  if (!onError)
+    onError = this.onError_;
+
+  if (this.isUsingGck_()) {
+    var now = new Date().getTime();
+
+    if (this.ckName_.size() == 0) {
+      // We haven't fetched the first GCK.
+      if (LOG > 3) console.log
+        ("The GCK is not yet available, so adding to the pending encrypt queue");
+      this.pendingEncrypts_.push
+        (new EncryptorV2.PendingEncrypt(plainData, onSuccess, onError));
+
+      if (!this.isGckRetrievalInProgress_) {
+        this.nextCheckForNewGck_ = now + this.checkForNewGckIntervalMilliseconds_;
+        // When the GCK is fetched, this will process the pending encrypts.
+        this.checkForNewGck_(onError);
+      }
+
+      return;
+    }
+
+    if (now > this.nextCheckForNewGck_) {
+      // Need to check for a new GCK.
+      this.nextCheckForNewGck_ = now + this.checkForNewGckIntervalMilliseconds_;
+      if (!this.isGckRetrievalInProgress_)
+        this.checkForNewGck_(onError);
+      // Continue below to encrypt with the current key.
+    }
+  }
+
+  var encryptedContent = this.encrypt(plainData);
+  try {
+    onSuccess(encryptedContent);
+  } catch (ex) {
+    console.log("Error in onSuccess: " + NdnCommon.getErrorWithStackTrace(ex));
+  }
+};
+
 /**
  * Create a new Content Key (CK) and publish the corresponding CK Data packet.
  * This uses the onError given to the constructor to report errors.
+ * @throws Error if this EncryptorV2 uses a group content key.
  */
 EncryptorV2.prototype.regenerateCk = function()
 {
+  if (this.isUsingGck_())
+    throw new Error("This EncryptorV2 uses a group content key. Cannot regenerateCk()");
+
   // TODO: Ensure that the CK Data packet for the old CK is published when the
   // CK is updated before the KEK is fetched.
 
@@ -49988,8 +41854,19 @@ EncryptorV2.prototype.regenerateCk = function()
   if (this.kekData_ == null)
     this.retryFetchingKek_();
   else
-    this.makeAndPublishCkData_(this.onError_);
+    this.makeAndPublishCkData_(function(){}, this.onError_);
 };
+
+/**
+ * Set the interval for sending an Interest to the access manager to get the
+ * name of the latest GCK (and to fetch it if it is new). If you don't call
+ * this, then use the default of 1 minute.
+ * @param {number} checkForNewGckInterval The interval in milliseconds.
+ */
+EncryptorV2.prototype.setCheckForNewGckInterval = function(checkForNewGckInterval)
+{
+  this.checkForNewGckIntervalMilliseconds_ = checkForNewGckInterval;
+}
 
 /**
  * Get the number of packets stored in in-memory storage.
@@ -49998,6 +41875,14 @@ EncryptorV2.prototype.regenerateCk = function()
 EncryptorV2.prototype.size = function()
 {
   return this.storage_.size();
+};
+
+EncryptorV2.PendingEncrypt = function EncryptorV2PendingEncrypt
+  (plainData, onSuccess, onError)
+{
+  this.plainData = plainData;
+  this.onSuccess = onSuccess;
+  this.onError = onError;
 };
 
 EncryptorV2.prototype.retryFetchingKek_ = function()
@@ -50047,11 +41932,18 @@ EncryptorV2.prototype.fetchKekAndPublishCkData_ = function
   var thisEncryptor = this;
   var onData = function(interest, kekData) {
     thisEncryptor.kekPendingInterestId_ = 0;
-    // TODO: Verify if the key is legitimate.
-    thisEncryptor.kekData_ = kekData;
-    if (thisEncryptor.makeAndPublishCkData_(onError))
-      onReady();
-    // Otherwise, failure has already been reported.
+
+    // Validate the Data signature.
+    thisEncryptor.validator_.validate
+      (kekData,
+       function(d) {
+         thisEncryptor.kekData_ = kekData;
+         thisEncryptor.makeAndPublishCkData_(onReady, onError);
+       },
+       function(d, error) {
+         onError(EncryptError.ErrorCode.CkRetrievalFailure,
+           "Validate KEK Data failure: " + error.toString());
+       });
   };
 
   var onTimeout = function(interest) {
@@ -50102,19 +41994,23 @@ EncryptorV2.prototype.fetchKekAndPublishCkData_ = function
 /**
  * Make a CK Data packet for ckName_ encrypted by the KEK in kekData_ and
  * insert it in the storage_.
+ * @param {function} onReady When the CK Data packet is made and published, this
+ * calls onReady().
  * @param {function} onError On failure, this calls onError(errorCode, message)
  * where errorCode is from EncryptError.ErrorCode, and message is an error
  * string.
- * @returns {boolean} True on success, else false.
  */
-EncryptorV2.prototype.makeAndPublishCkData_ = function(onError)
+EncryptorV2.prototype.makeAndPublishCkData_ = function(onReady, onError)
 {
   try {
     var kek = new PublicKey(this.kekData_.getContent());
 
     var content = new EncryptedContent();
     // Debug: Use a Promise.
+/* See https://github.com/operantnetworks/ndn-direct-ind/issues/12
     var payload = kek.encrypt(this.ckBits_, EncryptAlgorithmType.RsaOaep);
+ */
+    var payload = kek.encrypt(this.ckBits_, EncryptAlgorithmType.RsaPkcs);
     content.setPayload(payload);
 
     var ckData = new Data
@@ -50124,17 +42020,234 @@ EncryptorV2.prototype.makeAndPublishCkData_ = function(onError)
     // FreshnessPeriod can serve as a soft access control for revoking access.
     ckData.getMetaInfo().setFreshnessPeriod
       (EncryptorV2.DEFAULT_CK_FRESHNESS_PERIOD_MS);
-    // Debug: Use a Promise.
-    this.keyChain_.sign(ckData, this.ckDataSigningInfo_);
-    this.storage_.insert(ckData);
+    var thisEncryptor = this;
+    this.keyChain_.signPromise(ckData, this.ckDataSigningInfo_)
+      .then(function() {
+      thisEncryptor.storage_.insert(ckData);
 
-    if (LOG > 3) console.log("Publishing CK data: " + ckData.getName().toUri());
-    return true;
+      if (LOG > 3) console.log("Publishing CK data: " + ckData.getName().toUri());
+      onReady();
+      return SyncPromise.resolve();
+    })
+    .catch(function(err) {
+      onError(EncryptError.ErrorCode.EncryptionFailure,
+        "Failed to sign CK data " + ckData.getName().toUri() + ": " + err);
+    });
   } catch (ex) {
     onError(EncryptError.ErrorCode.EncryptionFailure,
       "Failed to encrypt generated CK with KEK " + this.kekData_.getName().toUri());
-    return false;
   }
+};
+
+
+/**
+ * Send an interest for the gckLatestPrefix_ to get the name of the latest
+ * GCK. If it doesn't match gckName_, then call fetchGck().
+ * @param {function} onError On failure, this calls onError(errorCode, message)
+ * where errorCode is from EncryptError.ErrorCode, and message is an error
+ * string.
+ */
+EncryptorV2.prototype.checkForNewGck_ = function(onError)
+{
+  if (this.isGckRetrievalInProgress_)
+    // Already checking.
+    return;
+  this.isGckRetrievalInProgress_ = true;
+
+  var thisEncryptor = this;
+  var onData = function(ckInterest, gckLatestData) {
+    // Validate the Data signature.
+    thisEncryptor.validator_.validate
+      (gckLatestData,
+       function(d) {
+         var newGckName = new Name();
+         try {
+           newGckName.wireDecode(gckLatestData.getContent());
+         } catch (ex) {
+           thisEncryptor.isGckRetrievalInProgress_ = false;
+           onError(EncryptError.ErrorCode.CkRetrievalFailure,
+             "Error decoding GCK name in: " + gckLatestData.getName().toUri());
+         }
+
+         if (newGckName.equals(thisEncryptor.ckName_)) {
+           // The latest is the same name, so do nothing.
+           thisEncryptor.isGckRetrievalInProgress_ = false;
+           return;
+         }
+
+         // Leave isGckRetrievalInProgress_ true.
+         thisEncryptor.fetchGck_(newGckName, onError, EncryptorV2.N_RETRIES);
+       },
+       function(d, error) {
+         thisEncryptor.isGckRetrievalInProgress_ = false;
+         onError(EncryptError.ErrorCode.CkRetrievalFailure,
+           "Validate GCK latest_ Data failure: " + error.toString());
+       });
+  };
+
+  var onTimeout = function(interest) {
+    thisEncryptor.isGckRetrievalInProgress_ = false;
+    onError(EncryptError.ErrorCode.CkRetrievalTimeout,
+      "Timeout for GCK _latest packet: " + interest.getName().toUri());
+  };
+
+  var onNetworkNack = function(interest, networkNack) {
+    thisEncryptor.isGckRetrievalInProgress_ = false;
+    onError(EncryptError.ErrorCode.CkRetrievalFailure,
+      "Network nack for GCK _latest packet: " + interest.getName().toUri() +
+      ". Got NACK (" + networkNack.getReason() + ")");
+  };
+
+  try {
+    this.face_.expressInterest
+      (new Interest(this.gckLatestPrefix_).setMustBeFresh(true).setCanBePrefix(true),
+       onData, onTimeout, onNetworkNack);
+  } catch (ex) {
+    thisEncryptor.isGckRetrievalInProgress_ = false;
+    onError(EncryptError.ErrorCode.General, "expressInterest error: " + ex);
+  }
+};
+
+/**
+ * Fetch the Data packet <gckName>/ENCRYPTED-BY/<credentials-key> and call
+ * decryptGck to decrypt it.
+ * @param {Name} gckName The name of the group content key formed from the
+ * access prefix, e.g. <access-prefix>/GCK/<gck-id> .
+ * @param {function} onError On failure, this calls onError(errorCode, message)
+ * where errorCode is from EncryptError.ErrorCode, and message is an error
+ * string.
+ * @param {number} nTriesLeft If fetching times out, decrement nTriesLeft and
+ * try again until it is zero.
+ */
+EncryptorV2.prototype.fetchGck_ = function(gckName, onError, nTriesLeft)
+{
+  // This is only called from checkForNewGck, so isGckRetrievalInProgress_ is true.
+
+  // <access-prefix>/GCK/<gck-id>  /ENCRYPTED-BY /<credential-identity>/KEY/<key-id>
+  // \                          /                \                                 /
+  //  -----------  -------------                  ----------------  ---------------
+  //             \/                                               \/
+  //           gckName                                    from configuration
+
+  var encryptedGckName = new Name(gckName);
+  encryptedGckName
+    .append(EncryptorV2.NAME_COMPONENT_ENCRYPTED_BY)
+    .append(this.credentialsKey_.getName());
+
+  if (LOG > 3) console.log("EncryptorV2: Fetching GCK " + encryptedGckName.toUri());
+
+  var thisEncryptor = this;
+  var onData = function(ckInterest, ckData) {
+    try {
+      thisEncryptor.gckPendingInterestId_ = 0;
+
+      // Leave isGckRetrievalInProgress_ true.
+      thisEncryptor.decryptGckAndProcessPendingDecrypts_(gckName, ckData, onError);
+    } catch (ex) {
+      onError(EncryptError.ErrorCode.General,
+        "Error in EncryptorV2::fetchGck onData: " + ex);
+    }
+  };
+
+  var onTimeout = function(interest) {
+    thisEncryptor.gckPendingInterestId_ = 0;
+    if (nTriesLeft > 1)
+      thisEncryptor.fetchGck_(gckName, onError, nTriesLeft - 1);
+    else {
+      thisEncryptor.isGckRetrievalInProgress_ = false;
+      onError(EncryptError.ErrorCode.CkRetrievalTimeout,
+        "Retrieval of GCK [" + interest.getName().toUri() + "] timed out");
+    }
+  };
+
+  var onNetworkNack = function(interest, networkNack) {
+    thisEncryptor.gckPendingInterestId_ = 0;
+    thisEncryptor.isGckRetrievalInProgress_ = false;
+    onError(EncryptError.ErrorCode.CkRetrievalFailure,
+      "Retrieval of GCK [" + interest.getName().toUri() +
+      "] failed. Got NACK (" + networkNack.getReason() + ")");
+  };
+
+  try {
+    this.gckPendingInterestId_ = this.face_.expressInterest
+      (new Interest(encryptedGckName).setMustBeFresh(true).setCanBePrefix(true),
+       onData, onTimeout, onNetworkNack);
+  } catch (ex) {
+    onError(EncryptError.ErrorCode.General, "expressInterest error: " + ex);
+  }
+};
+
+/**
+ * Decrypt the gckData fetched by fetchGck(), then copy it to ckBits_ and
+ * copy gckName to ckName_ . Then process pending decrypts.
+ * @param {Name} gckName The Name that fetchGck() used to fetch.
+ * @param {Data} gckData The GCK Data packet fetched by fetchGck_().
+ * @param {function} onError On failure, this calls onError(errorCode, message)
+ * where errorCode is from EncryptError.ErrorCode, and message is an error
+ * string.
+ */
+EncryptorV2.prototype.decryptGckAndProcessPendingDecrypts_ = function
+  (gckName, gckData, onError)
+{
+  // This is only called from fetchGck_, so isGckRetrievalInProgress_ is true.
+
+  if (LOG > 3) console.log("EncryptorV2: Decrypting GCK data " + gckData.getName().toUri());
+
+  var content = new EncryptedContent();
+  try {
+    content.wireDecodeV2(gckData.getContent());
+  } catch (ex) {
+    this.isGckRetrievalInProgress_ = false;
+    onError(EncryptError.ErrorCode.InvalidEncryptedFormat,
+      "Error decrypting EncryptedContent: " + ex);
+    return;
+  }
+
+  var thisEncryptor = this;
+  this.keyChain_.getTpm().decryptPromise
+    (content.getPayload().buf(), this.credentialsKey_.getName())
+  .then(function(decryptedCkBits) {
+    if (decryptedCkBits.isNull()) {
+      thisEncryptor.isGckRetrievalInProgress_ = false;
+      onError(EncryptError.ErrorCode.TpmKeyNotFound,
+        "Could not decrypt secret, " + thisEncryptor.credentialsKey_.getName().toUri() +
+        " not found in TPM");
+      return SyncPromise.resolve();
+    }
+
+    if (decryptedCkBits.size() != thisEncryptor.ckBits_.length) {
+      thisEncryptor.isGckRetrievalInProgress_ = false;
+      onError(EncryptError.ErrorCode.DecryptionFailure,
+        "The decrypted group content key is not the correct size for the encryption algorithm");
+      return SyncPromise.resolve();
+    }
+    thisEncryptor.ckName_ = new Name(gckName);
+    decryptedCkBits.buf().copy(thisEncryptor.ckBits_);
+    thisEncryptor.isGckRetrievalInProgress_ = false;
+
+    for (var i in thisEncryptor.pendingEncrypts_) {
+      var pendingEncrypt = thisEncryptor.pendingEncrypts_[i];
+      // TODO: If this calls onError, should we quit?
+      var encryptedContent = thisEncryptor.encrypt(pendingEncrypt.plainData);
+      try {
+        pendingEncrypt.onSuccess(encryptedContent);
+      } catch (ex) {
+        console.log("Error in onSuccess: " + NdnCommon.getErrorWithStackTrace(ex));
+      }
+    }
+
+    thisEncryptor.pendingEncrypts = [];
+    return SyncPromise.resolve();
+  })
+  .catch(function(err) {
+    this.isGckRetrievalInProgress_ = false;
+    onError(EncryptError.ErrorCode.DecryptionFailure,
+      "Error decrypting the GCK: " + err);
+  });
+};
+
+EncryptorV2.prototype.isUsingGck_ = function() { 
+  return this.gckLatestPrefix_.size() !== 0;
 };
 
 EncryptorV2.NAME_COMPONENT_ENCRYPTED_BY = new Name.Component("ENCRYPTED-BY");
@@ -50142,6 +42255,8 @@ EncryptorV2.NAME_COMPONENT_NAC = new Name.Component("NAC");
 EncryptorV2.NAME_COMPONENT_KEK = new Name.Component("KEK");
 EncryptorV2.NAME_COMPONENT_KDK = new Name.Component("KDK");
 EncryptorV2.NAME_COMPONENT_CK = new Name.Component("CK");
+EncryptorV2.NAME_COMPONENT_GCK = new Name.Component("GCK");
+EncryptorV2.NAME_COMPONENT_LATEST = new Name.Component("_latest");
 
 EncryptorV2.RETRY_DELAY_AFTER_NACK_MS = 1000.0;
 EncryptorV2.RETRY_DELAY_KEK_RETRIEVAL_MS = 60 * 1000.0;
@@ -50151,3756 +42266,6 @@ EncryptorV2.AES_IV_SIZE = 16;
 EncryptorV2.N_RETRIES = 3;
 
 EncryptorV2.DEFAULT_CK_FRESHNESS_PERIOD_MS = 3600 * 1000.0;
-/**
- * Copyright (C) 2015-2019 Regents of the University of California.
- * @author: Jeff Thompson <jefft0@remap.ucla.edu>
- * @author: From ndn-group-encrypt src/group-manager-db https://github.com/named-data/ndn-group-encrypt
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU Lesser General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU Lesser General Public License for more details.
- *
- * You should have received a copy of the GNU Lesser General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
- * A copy of the GNU Lesser General Public License is in the file COPYING.
- */
-
-/** @ignore */
-var SyncPromise = require('../util/sync-promise.js').SyncPromise;
-
-/**
- * GroupManagerDb is a base class for the storage of data used by the
- * GroupManager. It contains two tables to store Schedules and Members.
- * This is an abstract base class. A subclass must implement the methods.
- * For example, see Sqlite3GroupManagerDb (for Nodejs) or IndexedDbGroupManagerDb
- * (for the browser).
- * @note This class is an experimental feature. The API may change.
- * @constructor
- */
-var GroupManagerDb = function GroupManagerDb()
-{
-};
-
-exports.GroupManagerDb = GroupManagerDb;
-
-/**
- * Create a new GroupManagerDb.Error to report an error using GroupManagerDb
- * methods, wrapping the given error object.
- * Call with: throw new GroupManagerDb.Error(new Error("message")).
- * @constructor
- * @param {Error} error The exception created with new Error.
- */
-GroupManagerDb.Error = function GroupManagerDbError(error)
-{
-  if (error) {
-    error.__proto__ = GroupManagerDb.Error.prototype;
-    return error;
-  }
-};
-
-GroupManagerDb.Error.prototype = new Error();
-GroupManagerDb.Error.prototype.name = "GroupManagerDbError";
-
-////////////////////////////////////////////////////// Schedule management.
-
-/**
- * Check if there is a schedule with the given name.
- * @param {string} name The name of the schedule.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise that returns true if there is a
- * schedule (else false), or that is rejected with GroupManagerDb.Error for a
- * database error.
- */
-GroupManagerDb.prototype.hasSchedulePromise = function(name, useSync)
-{
-  return SyncPromise.reject(new Error
-    ("GroupManagerDb.hasSchedulePromise is not implemented"));
-};
-
-/**
- * List all the names of the schedules.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise that returns a new array of string
- * with the names of all schedules, or that is rejected with
- * GroupManagerDb.Error for a database error.
- */
-GroupManagerDb.prototype.listAllScheduleNamesPromise = function(useSync)
-{
-  return SyncPromise.reject(new Error
-    ("GroupManagerDb.listAllScheduleNamesPromise is not implemented"));
-};
-
-/**
- * Get a schedule with the given name.
- * @param {string} name The name of the schedule.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise that returns a new Schedule object,
- * or that is rejected with GroupManagerDb.Error if the schedule does not exist
- * or other database error.
- */
-GroupManagerDb.prototype.getSchedulePromise = function(name, useSync)
-{
-  return SyncPromise.reject(new Error
-    ("GroupManagerDb.getSchedulePromise is not implemented"));
-};
-
-/**
- * For each member using the given schedule, get the name and public key DER
- * of the member's key.
- * @param {string} name The name of the schedule.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise that returns a new array of object
- * (where "keyName" is the Name of the public key and "publicKey" is the Blob of
- * the public key DER), or that is rejected with GroupManagerDb.Error for a
- * database error. Note that the member's identity name is keyName.getPrefix(-1).
- * If the schedule name is not found, the list is empty.
- */
-GroupManagerDb.prototype.getScheduleMembersPromise = function
-  (name, useSync)
-{
-  return SyncPromise.reject(new Error
-    ("GroupManagerDb.getScheduleMembersPromise is not implemented"));
-};
-
-/**
- * Add a schedule with the given name.
- * @param {string} name The name of the schedule. The name cannot be empty.
- * @param {Schedule} schedule The Schedule to add.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise that fulfills when the schedule is
- * added, or that is rejected with GroupManagerDb.Error if a schedule with the
- * same name already exists, if the name is empty, or other database error.
- */
-GroupManagerDb.prototype.addSchedulePromise = function(name, schedule, useSync)
-{
-  return SyncPromise.reject(new Error
-    ("GroupManagerDb.addSchedulePromise is not implemented"));
-};
-
-/**
- * Delete the schedule with the given name. Also delete members which use this
- * schedule. If there is no schedule with the name, then do nothing.
- * @param {string} name The name of the schedule.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise that fulfills when the schedule is
- * deleted (or there is no such schedule), or that is rejected with
- * GroupManagerDb.Error for a database error.
- */
-GroupManagerDb.prototype.deleteSchedulePromise = function(name, useSync)
-{
-  return SyncPromise.reject(new Error
-    ("GroupManagerDb.deleteSchedulePromise is not implemented"));
-};
-
-/**
- * Rename a schedule with oldName to newName.
- * @param {string} oldName The name of the schedule to be renamed.
- * @param {string} newName The new name of the schedule. The name cannot be empty.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise that fulfills when the schedule is
- * renamed, or that is rejected with GroupManagerDb.Error if a schedule with
- * newName already exists, if the schedule with oldName does not exist, if
- * newName is empty, or other database error.
- */
-GroupManagerDb.prototype.renameSchedulePromise = function
-  (oldName, newName, useSync)
-{
-  return SyncPromise.reject(new Error
-    ("GroupManagerDb.renameSchedulePromise is not implemented"));
-};
-
-/**
- * Update the schedule with name and replace the old object with the given
- * schedule. Otherwise, if no schedule with name exists, a new schedule
- * with name and the given schedule will be added to database.
- * @param {string} name The name of the schedule. The name cannot be empty.
- * @param {Schedule} schedule The Schedule to update or add.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise that fulfills when the schedule is
- * updated, or that is rejected with GroupManagerDb.Error if the name is empty,
- * or other database error.
- */
-GroupManagerDb.prototype.updateSchedulePromise = function
-  (name, schedule, useSync)
-{
-  return SyncPromise.reject(new Error
-    ("GroupManagerDb.updateSchedulePromise is not implemented"));
-};
-
-////////////////////////////////////////////////////// Member management.
-
-/**
- * Check if there is a member with the given identity name.
- * @param {Name} identity The member's identity name.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise that returns true if there is a
- * member (else false), or that is rejected with GroupManagerDb.Error for a
- * database error.
- */
-GroupManagerDb.prototype.hasMemberPromise = function(identity, useSync)
-{
-  return SyncPromise.reject(new Error
-    ("GroupManagerDb.hasMemberPromise is not implemented"));
-};
-
-/**
- * List all the members.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise that returns a new array of Name with
- * the names of all members, or that is rejected with GroupManagerDb.Error for a
- * database error.
- */
-GroupManagerDb.prototype.listAllMembersPromise = function(useSync)
-{
-  return SyncPromise.reject(new Error
-    ("GroupManagerDb.listAllMembersPromise is not implemented"));
-};
-
-/**
- * Get the name of the schedule for the given member's identity name.
- * @param {Name} identity The member's identity name.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise that returns the string schedule name,
- * or that is rejected with GroupManagerDb.Error if there's no member with the
- * given identity name in the database, or other database error.
- */
-GroupManagerDb.prototype.getMemberSchedulePromise = function(identity, useSync)
-{
-  return SyncPromise.reject(new Error
-    ("GroupManagerDb.getMemberSchedulePromise is not implemented"));
-};
-
-/**
- * Add a new member with the given key named keyName into a schedule named
- * scheduleName. The member's identity name is keyName.getPrefix(-1).
- * @param {string} scheduleName The schedule name.
- * @param {Name} keyName The name of the key.
- * @param {Blob} key A Blob of the public key DER.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise that fulfills when the member is
- * added, or that is rejected with GroupManagerDb.Error if there's no schedule
- * named scheduleName, if the member's identity name already exists, or other
- * database error.
- */
-GroupManagerDb.prototype.addMemberPromise = function
-  (scheduleName, keyName, key, useSync)
-{
-  return SyncPromise.reject(new Error
-    ("GroupManagerDb.addMemberPromise is not implemented"));
-};
-
-/**
- * Change the name of the schedule for the given member's identity name.
- * @param {Name} identity The member's identity name.
- * @param {string} scheduleName The new schedule name.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise that fulfills when the member is
- * updated, or that is rejected with GroupManagerDb.Error if there's no member
- * with the given identity name in the database, or there's no schedule named
- * scheduleName, or other database error.
- */
-GroupManagerDb.prototype.updateMemberSchedulePromise = function
-  (identity, scheduleName, useSync)
-{
-  return SyncPromise.reject(new Error
-    ("GroupManagerDb.updateMemberSchedulePromise is not implemented"));
-};
-
-/**
- * Delete a member with the given identity name. If there is no member with
- * the identity name, then do nothing.
- * @param {Name} identity The member's identity name.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise that fulfills when the member is
- * deleted (or there is no such member), or that is rejected with
- * GroupManagerDb.Error for a database error.
- */
-GroupManagerDb.prototype.deleteMemberPromise = function(identity, useSync)
-{
-  return SyncPromise.reject(new Error
-    ("GroupManagerDb.deleteMemberPromise is not implemented"));
-};
-
-/**
- * Check if there is an EKey with the name eKeyName in the database.
- * @param {Name} eKeyName The name of the EKey.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise that returns true if the EKey exists
- * (else false), or that is rejected with GroupManagerDb.Error for a database
- * error.
- */
-GroupManagerDb.prototype.hasEKeyPromise = function(eKeyName, useSync)
-{
-  return SyncPromise.reject(new Error
-    ("GroupManagerDb.hasEKeyPromise is not implemented"));
-};
-
-/**
- * Add the EKey with name eKeyName to the database.
- * @param {Name} eKeyName The name of the EKey. This copies the Name.
- * @param {Blob} publicKey The encoded public Key of the group key pair.
- * @param {Blob} privateKey The encoded private Key of the group key pair.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise that fulfills when the EKey is added,
- * or that is rejected with GroupManagerDb.Error if a key with name eKeyName
- * already exists in the database, or other database error.
- */
-GroupManagerDb.prototype.addEKeyPromise = function
-  (eKeyName, publicKey, privateKey, useSync)
-{
-  return SyncPromise.reject(new Error
-    ("GroupManagerDb.addEKeyPromise is not implemented"));
-};
-
-/**
- * Get the group key pair with the name eKeyName from the database.
- * @param {Name} eKeyName The name of the EKey.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise that returns an object (where
- * "publicKey" is the public key Blob and "privateKey" is the private key Blob),
- * or that is rejected with GroupManagerDb.Error for a database error.
- */
-GroupManagerDb.prototype.getEKeyPromise = function(eKeyName, useSync)
-{
-  return SyncPromise.reject(new Error
-    ("GroupManagerDb.getEKeyPromise is not implemented"));
-};
-
-/**
- * Delete all the EKeys in the database. The database will keep growing because
- * EKeys will keep being added, so this method should be called periodically.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise that fulfills when the EKeys are
- * deleted, or that is rejected with GroupManagerDb.Error for a database error.
- */
-GroupManagerDb.prototype.cleanEKeysPromise = function(useSync)
-{
-  return SyncPromise.reject(new Error
-    ("GroupManagerDb.cleanEKeysPromise is not implemented"));
-};
-
-/**
- * Delete the EKey with name eKeyName from the database. If no key with the
- * name exists in the database, do nothing.
- * @param {Name} eKeyName The name of the EKey.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise that fulfills when the EKey is
- * deleted (or there is no such key), or that is rejected with
- * GroupManagerDb.Error for a database error.
- */
-GroupManagerDb.prototype.deleteEKeyPromise = function(eKeyName, useSync)
-{
-  return SyncPromise.reject(new Error
-    ("GroupManagerDb.deleteEKeyPromise is not implemented"));
-};
-/**
- * Copyright (C) 2015-2019 Regents of the University of California.
- * @author: Jeff Thompson <jefft0@remap.ucla.edu>
- * @author: From ndn-group-encrypt src/group-manager https://github.com/named-data/ndn-group-encrypt
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU Lesser General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU Lesser General Public License for more details.
- *
- * You should have received a copy of the GNU Lesser General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
- * A copy of the GNU Lesser General Public License is in the file COPYING.
- */
-
-/** @ignore */
-var Name = require('../name.js').Name; /** @ignore */
-var Data = require('../data.js').Data; /** @ignore */
-var SyncPromise = require('../util/sync-promise.js').SyncPromise; /** @ignore */
-var IdentityCertificate = require('../security/certificate/identity-certificate.js').IdentityCertificate; /** @ignore */
-var SecurityException = require('../security/security-exception.js').SecurityException; /** @ignore */
-var RsaKeyParams = require('../security/key-params.js').RsaKeyParams; /** @ignore */
-var EncryptParams = require('./algo/encrypt-params.js').EncryptParams; /** @ignore */
-var EncryptAlgorithmType = require('./algo/encrypt-params.js').EncryptAlgorithmType; /** @ignore */
-var Encryptor = require('./algo/encryptor.js').Encryptor; /** @ignore */
-var RsaAlgorithm = require('./algo/rsa-algorithm.js').RsaAlgorithm; /** @ignore */
-var Interval = require('./interval.js').Interval; /** @ignore */
-var Schedule = require('./schedule.js').Schedule;
-
-/**
- * A GroupManager manages keys and schedules for group members in a particular
- * namespace.
- * Create a group manager with the given values. The group manager namespace
- * is <prefix>/read/<dataType> .
- * @param {Name} prefix The prefix for the group manager namespace.
- * @param {Name} dataType The data type for the group manager namespace.
- * @param {GroupManagerDb} database The GroupManagerDb for storing the group
- * management information (including user public keys and schedules).
- * @param {number} keySize The group key will be an RSA key with keySize bits.
- * @param {number} freshnessHours The number of hours of the freshness period of
- *   data packets carrying the keys.
- * @param {KeyChain} keyChain The KeyChain to use for signing data packets. This
- * signs with the default identity.
- * @note This class is an experimental feature. The API may change.
- * @constructor
- */
-var GroupManager = function GroupManager
-  (prefix, dataType, database, keySize, freshnessHours, keyChain)
-{
-  this.namespace_ = new Name(prefix).append(Encryptor.NAME_COMPONENT_READ)
-    .append(dataType);
-  this.database_ = database;
-  this.keySize_ = keySize;
-  this.freshnessHours_ = freshnessHours;
-
-  this.keyChain_ = keyChain;
-};
-
-exports.GroupManager = GroupManager;
-
-/**
- * Create a group key for the interval into which timeSlot falls. This creates
- * a group key if it doesn't exist, and encrypts the key using the public key of
- * each eligible member.
- * @param {number} timeSlot The time slot to cover as milliseconds since
- * Jan 1, 1970 UTC.
- * @param {boolean} needRegenerate (optional) needRegenerate should be true if
- * this is the first time this method is called, or a member was removed.
- * needRegenerate can be false if this is not the first time this method is
- * called, or a member was added. If omitted, use true. If useSync is specified,
- * then needRegenerate must also be specified (since this can't disambiguate
- * two optional boolean parameters).
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise. If useSync is specified, then needRegenerate must also be
- * specified (since this can't disambiguate two optional boolean parameters).
- * @return {Promise|SyncPromise} A promise that returns a List of Data packets
- * (where the first is the E-KEY data packet with the group's public key and the
- * rest are the D-KEY data packets with the group's private key encrypted with
- * the public key of each eligible member), or that is rejected with
- * GroupManagerDb.Error for a database error or SecurityException for an error
- * using the security KeyChain.
- */
-GroupManager.prototype.getGroupKeyPromise = function
-  (timeSlot, needRegenerate, useSync)
-{
-  if (needRegenerate == undefined)
-    needRegenerate = true;
-
-  var memberKeys = [];
-  var result = [];
-  var thisManager = this;
-  var privateKeyBlob;
-  var publicKeyBlob;
-  var startTimeStamp;
-  var endTimeStamp;
-
-  // Get the time interval.
-  return this.calculateIntervalPromise_(timeSlot, memberKeys, useSync)
-  .then(function(finalInterval) {
-    if (finalInterval.isValid() == false)
-      return SyncPromise.resolve(result);
-
-    startTimeStamp = Schedule.toIsoString(finalInterval.getStartTime());
-    endTimeStamp = Schedule.toIsoString(finalInterval.getEndTime());
-
-    // Generate the private and public keys.
-    var eKeyName = new Name(thisManager.namespace_);
-    eKeyName.append(Encryptor.NAME_COMPONENT_E_KEY).append(startTimeStamp)
-      .append(endTimeStamp);
-
-    return SyncPromise.resolve()
-    .then(function() {
-      // Only call hasEKeyPromise if needRegenerate is false.
-      if (!needRegenerate)
-        return thisManager.database_.hasEKeyPromise(eKeyName, useSync);
-      else
-        return SyncPromise.resolve(false);
-    })
-    .then(function(hasEKey) {
-      if (!needRegenerate && hasEKey) {
-        return thisManager.getEKeyPromise_(eKeyName, useSync)
-        .then(function(keyPair) {
-          privateKeyBlob = keyPair.privateKey;
-          publicKeyBlob = keyPair.publicKey;
-          return SyncPromise.resolve();
-        });
-      }
-      else {
-        return thisManager.generateKeyPairPromise_(useSync)
-        .then(function(keyPair) {
-          privateKeyBlob = keyPair.privateKeyBlob;
-          publicKeyBlob = keyPair.publicKeyBlob;
-
-          // deleteEKeyPromise_ does nothing if eKeyName does not exist.
-          return thisManager.deleteEKeyPromise_(eKeyName, useSync);
-        })
-        .then(function() {
-          return thisManager.addEKeyPromise_
-            (eKeyName, publicKeyBlob, privateKeyBlob, useSync);
-        });
-      }
-    })
-    .then(function() {
-      // Add the first element to the result.
-      // The E-KEY (public key) data packet name convention is:
-      // /<data_type>/E-KEY/[start-ts]/[end-ts]
-      return thisManager.createEKeyDataPromise_
-        (startTimeStamp, endTimeStamp, publicKeyBlob, useSync);
-    })
-    .then(function(data) {
-      result.push(data);
-
-      // Encrypt the private key with the public key from each member's certificate.
-
-      // Process the memberKeys entry at i, and recursively call to process the
-      // next entry. Return a promise which is resolved when all are processed.
-      // (We have to make a recursive function to use Promises.)
-      function processMemberKey(i) {
-        if (i >= memberKeys.length)
-          // Finished.
-          return SyncPromise.resolve();
-
-        var keyName = memberKeys[i].keyName;
-        var certificateKey = memberKeys[i].publicKey;
-
-        return thisManager.createDKeyDataPromise_
-          (startTimeStamp, endTimeStamp, keyName, privateKeyBlob, certificateKey,
-           useSync)
-        .then(function(data) {
-          result.push(data);
-
-          return processMemberKey(i + 1);
-        });
-      }
-
-      return processMemberKey(0);
-    })
-    .then(function() {
-      return SyncPromise.resolve(result);
-    });
-  });
-};
-
-/**
- * Add a schedule with the given scheduleName.
- * @param {string} scheduleName The name of the schedule. The name cannot be
- * empty.
- * @param {Schedule} schedule The Schedule to add.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise that fulfills when the schedule is
- * added, or that is rejected with GroupManagerDb.Error if a schedule with the
- * same name already exists, if the name is empty, or other database error.
- */
-GroupManager.prototype.addSchedulePromise = function
-  (scheduleName, schedule, useSync)
-{
-  return this.database_.addSchedulePromise(scheduleName, schedule, useSync);
-};
-
-/**
- * Delete the schedule with the given scheduleName. Also delete members which
- * use this schedule. If there is no schedule with the name, then do nothing.
- * @param {string} scheduleName The name of the schedule.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise that fulfills when the schedule is
- * deleted (or there is no such schedule), or that is rejected with
- * GroupManagerDb.Error for a database error.
- */
-GroupManager.prototype.deleteSchedulePromise = function(scheduleName, useSync)
-{
-  return this.database_.deleteSchedulePromise(scheduleName, useSync);
-};
-
-/**
- * Update the schedule with scheduleName and replace the old object with the
- * given schedule. Otherwise, if no schedule with name exists, a new schedule
- * with name and the given schedule will be added to database.
- * @param {string} scheduleName The name of the schedule. The name cannot be
- * empty.
- * @param {Schedule} schedule The Schedule to update or add.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise that fulfills when the schedule is
- * updated, or that is rejected with GroupManagerDb.Error if the name is empty,
- * or other database error.
- */
-GroupManager.prototype.updateSchedulePromise = function
-  (scheduleName, schedule, useSync)
-{
-  return this.database_.updateSchedulePromise(scheduleName, schedule, useSync);
-};
-
-/**
- * Add a new member with the given memberCertificate into a schedule named
- * scheduleName. If cert is an IdentityCertificate made from memberCertificate,
- * then the member's identity name is cert.getPublicKeyName().getPrefix(-1).
- * @param {string} scheduleName The schedule name.
- * @param {Data} memberCertificate The member's certificate.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise that fulfills when the member is
- * added, or that is rejected with GroupManagerDb.Error if there's no schedule
- * named scheduleName, if the member's identity name already exists, or other
- * database error. Or a promise that is rejected with DerDecodingException for
- * an error decoding memberCertificate as a certificate.
- */
-GroupManager.prototype.addMemberPromise = function
-  (scheduleName, memberCertificate, useSync)
-{
-  var cert = new IdentityCertificate(memberCertificate);
-  return this.database_.addMemberPromise
-    (scheduleName, cert.getPublicKeyName(), cert.getPublicKeyInfo().getKeyDer(),
-     useSync);
-};
-
-/**
- * Remove a member with the given identity name. If there is no member with
- * the identity name, then do nothing.
- * @param {Name} identity The member's identity name.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise that fulfills when the member is
- * removed (or there is no such member), or that is rejected with
- * GroupManagerDb.Error for a database error.
- */
-GroupManager.prototype.removeMemberPromise = function(identity, useSync)
-{
-  return this.database_.deleteMemberPromise(identity, useSync);
-};
-
-/**
- * Change the name of the schedule for the given member's identity name.
- * @param {Name} identity The member's identity name.
- * @param {string} scheduleName The new schedule name.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise that fulfills when the member is
- * updated, or that is rejected with GroupManagerDb.Error if there's no member
- * with the given identity name in the database, or there's no schedule named
- * scheduleName.
- */
-GroupManager.prototype.updateMemberSchedulePromise = function
-  (identity, scheduleName, useSync)
-{
-  return this.database_.updateMemberSchedulePromise
-    (identity, scheduleName, useSync);
-};
-
-/**
- * Delete all the EKeys in the database. The database will keep growing because
- * EKeys will keep being added, so this method should be called periodically.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise that fulfills when the EKeys are
- * deleted, or that is rejected with GroupManagerDb.Error for a database error.
- */
-GroupManager.prototype.cleanEKeysPromise = function(useSync)
-{
-  return this.database_.cleanEKeysPromise(useSync);
-};
-
-/**
- * Calculate an Interval that covers the timeSlot.
- * @param {number} timeSlot The time slot to cover as milliseconds since
- * Jan 1, 1970 UTC.
- * @param {Array<object>} memberKeys First clear memberKeys then fill it with
- * the info of members who are allowed to access the interval. memberKeys is an
- * array of object where "keyName" is the Name of the public key and "publicKey"
- * is the Blob of the public key DER. The memberKeys entries are sorted by
- * the entry keyName.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise that returns a new nterval covering
- * the time slot, or that is rejected with GroupManagerDb.Error for a database
- * error.
- */
-GroupManager.prototype.calculateIntervalPromise_ = function
-  (timeSlot, memberKeys, useSync)
-{
-  // Prepare.
-  var positiveResult = new Interval();
-  var negativeResult = new Interval();
-  // Clear memberKeys.
-  memberKeys.splice(0, memberKeys.length);
-  var thisManager = this;
-
-  // Get the all intervals from the schedules.
-  return this.database_.listAllScheduleNamesPromise(useSync)
-  .then(function(scheduleNames) {
-    // Process the scheduleNames entry at i, and recursively call to process the
-    // next entry. Return a promise which is resolved when all are processed.
-    // (We have to make a recursive function to use Promises.)
-    function processSchedule(i) {
-      if (i >= scheduleNames.length)
-        // Finished.
-        return SyncPromise.resolve();
-
-      var scheduleName = scheduleNames[i];
-
-      return thisManager.database_.getSchedulePromise(scheduleName, useSync)
-      .then(function(schedule) {
-        var result = schedule.getCoveringInterval(timeSlot);
-        var tempInterval = result.interval;
-
-        if (result.isPositive) {
-          if (!positiveResult.isValid())
-            positiveResult = tempInterval;
-          positiveResult.intersectWith(tempInterval);
-
-          return thisManager.database_.getScheduleMembersPromise
-            (scheduleName, useSync)
-          .then(function(map) {
-            // Add each entry in map to memberKeys.
-            for (var iMap = 0; iMap < map.length; ++iMap)
-              GroupManager.memberKeysAdd_(memberKeys, map[iMap]);
-
-            return processSchedule(i + 1);
-          });
-        }
-        else {
-          if (!negativeResult.isValid())
-            negativeResult = tempInterval;
-          negativeResult.intersectWith(tempInterval);
-
-          return processSchedule(i + 1);
-        }
-      });
-    }
-
-    return processSchedule(0);
-  })
-  .then(function() {
-    if (!positiveResult.isValid())
-      // Return an invalid interval when there is no member which has an
-      // interval covering the time slot.
-      return SyncPromise.resolve(new Interval(false));
-
-    // Get the final interval result.
-    var finalInterval;
-    if (negativeResult.isValid())
-      finalInterval = positiveResult.intersectWith(negativeResult);
-    else
-      finalInterval = positiveResult;
-
-    return SyncPromise.resolve(finalInterval);
-  });
-};
-
-/**
- * Add entry to memberKeys, sorted by entry.keyName. If there is already an
- * entry with keyName, then don't add.
- */
-GroupManager.memberKeysAdd_ = function(memberKeys, entry)
-{
-  // Find the index of the first node where the keyName is not less than
-  // entry.keyName.
-  var i = 0;
-  while (i < memberKeys.length) {
-    var comparison = memberKeys[i].keyName.compare(entry.keyName);
-    if (comparison == 0)
-      // A duplicate, so don't add.
-      return;
-
-    if (comparison > 0)
-      break;
-    i += 1;
-  }
-
-  memberKeys.splice(i, 0, entry);
-};
-
-/**
- * Generate an RSA key pair according to keySize_.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise that returns an object where
- * "privateKeyBlob" is the encoding Blob of the private key and "publicKeyBlob"
- * is the encoding Blob of the public key.
- */
-GroupManager.prototype.generateKeyPairPromise_ = function(useSync)
-{
-  var params = new RsaKeyParams(this.keySize_);
-
-  return RsaAlgorithm.generateKeyPromise(params)
-  .then(function(privateKey) {
-    var privateKeyBlob = privateKey.getKeyBits();
-    var publicKey = RsaAlgorithm.deriveEncryptKey(privateKeyBlob);
-    var publicKeyBlob = publicKey.getKeyBits();
-
-    return SyncPromise.resolve
-      ({ privateKeyBlob: privateKeyBlob, publicKeyBlob: publicKeyBlob });
-  });
-};
-
-/**
- * Create an E-KEY Data packet for the given public key.
- * @param {string} startTimeStamp The start time stamp string to put in the name.
- * @param {string} endTimeStamp The end time stamp string to put in the name.
- * @param {Blob} publicKeyBlob A Blob of the public key DER.
- * @return The Data packet.
- * @throws SecurityException for an error using the security KeyChain.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise that returns the Data packet, or that
- * is rejected with SecurityException for an error using the security KeyChain.
- */
-GroupManager.prototype.createEKeyDataPromise_ = function
-  (startTimeStamp, endTimeStamp, publicKeyBlob, useSync)
-{
-  var name = new Name(this.namespace_);
-  name.append(Encryptor.NAME_COMPONENT_E_KEY).append(startTimeStamp)
-    .append(endTimeStamp);
-
-  var data = new Data(name);
-  data.getMetaInfo().setFreshnessPeriod
-    (this.freshnessHours_ * GroupManager.MILLISECONDS_IN_HOUR);
-  data.setContent(publicKeyBlob);
-
-  return this.keyChain_.signPromise(data);
-};
-
-/**
- * Create a D-KEY Data packet with an EncryptedContent for the given private
- * key, encrypted with the certificate key.
- * @param {string} startTimeStamp The start time stamp string to put in the name.
- * @param {string} endTimeStamp The end time stamp string to put in the name.
- * @param {Name} keyName The key name to put in the data packet name and the
- * EncryptedContent key locator.
- * @param {Blob} privateKeyBlob A Blob of the encoded private key.
- * @param {Blob} certificateKey The certificate key encoding, used to encrypt
- * the private key.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise that returns the Data packet, or that
- * is rejected with SecurityException for an error using the security KeyChain.
- */
-GroupManager.prototype.createDKeyDataPromise_ = function
-  (startTimeStamp, endTimeStamp, keyName, privateKeyBlob, certificateKey,
-   useSync)
-{
-  var name = new Name(this.namespace_);
-  name.append(Encryptor.NAME_COMPONENT_D_KEY);
-  name.append(startTimeStamp).append(endTimeStamp);
-  var data = new Data(name);
-  data.getMetaInfo().setFreshnessPeriod
-    (this.freshnessHours_ * GroupManager.MILLISECONDS_IN_HOUR);
-  var encryptParams = new EncryptParams(EncryptAlgorithmType.RsaOaep);
-  var thisManager = this;
-
-  return Encryptor.encryptDataPromise
-    (data, privateKeyBlob, keyName, certificateKey, encryptParams, useSync)
-  .catch(function(ex) {
-    // Consolidate errors such as InvalidKeyException.
-    return SyncPromise.reject(SecurityException(new Error
-      ("createDKeyData: Error in encryptData: " + ex)));
-  })
-  .then(function() {
-    return thisManager.keyChain_.signPromise(data);
-  });
-};
-
-/**
- * Add the EKey with name eKeyName to the database.
- * @param {Name} eKeyName The name of the EKey. This copies the Name.
- * @param {Blob} publicKey The encoded public Key of the group key pair.
- * @param {Blob} privateKey The encoded private Key of the group key pair.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise that fulfills when the EKey is added,
- * or that is rejected with GroupManagerDb.Error if a key with name eKeyName
- * already exists in the database, or other database error.
- */
-GroupManager.prototype.addEKeyPromise_ = function
-  (eKeyName, publicKey, privateKey, useSync)
-{
-  return this.database_.addEKeyPromise(eKeyName, publicKey, privateKey, useSync);
-};
-
-/**
- * Get the group key pair with the name eKeyName from the database.
- * @param {Name} eKeyName The name of the EKey.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise that returns an object (where
- * "publicKey" is the public key Blob and "privateKey" is the private key Blob),
- * or that is rejected with GroupManagerDb.Error for a database error.
- */
-GroupManager.prototype.getEKeyPromise_ = function(eKeyName, useSync)
-{
-  return this.database_.getEKeyPromise(eKeyName, useSync);
-};
-
-/**
- * Delete the EKey with name eKeyName from the database. If no key with the
- * name exists in the database, do nothing.
- * @param {Name} eKeyName The name of the EKey.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise that fulfills when the EKey is
- * deleted (or there is no such key), or that is rejected with
- * GroupManagerDb.Error for a database error.
- */
-GroupManager.prototype.deleteEKeyPromise_ = function(eKeyName, useSync)
-{
-  return this.database_.deleteEKeyPromise(eKeyName, useSync);
-};
-
-GroupManager.MILLISECONDS_IN_HOUR = 3600 * 1000;
-/**
- * Copyright (C) 2015-2019 Regents of the University of California.
- * @author: Jeff Thompson <jefft0@remap.ucla.edu>
- * @author: From ndn-group-encrypt src/interval https://github.com/named-data/ndn-group-encrypt
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU Lesser General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU Lesser General Public License for more details.
- *
- * You should have received a copy of the GNU Lesser General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
- * A copy of the GNU Lesser General Public License is in the file COPYING.
- */
-
-/**
- * An Interval defines a time duration which contains a start timestamp and an
- * end timestamp. Create an Interval with one of these forms:
- * Interval(isValid).
- * Interval(startTime, endTime).
- * Interval(interval).
- * @param {boolean} isValid True to create a valid empty interval, false to
- * create an invalid interval.
- * @param {number} startTime The start time as milliseconds since Jan 1, 1970 UTC.
- * The start time must be less than the end time. To create an empty interval
- * (start time equals end time), use the constructor Interval(true).
- * @param {number} endTime The end time as milliseconds since Jan 1, 1970 UTC.
- * @param {Interval} interval The other interval with values to copy.
- * @note This class is an experimental feature. The API may change.
- * @constructor
- */
-var Interval = function Interval(value, endTime)
-{
-  if (typeof value === 'object' && value instanceof Interval) {
-    // Make a copy.
-    this.startTime_ = value.startTime_;
-    this.endTime_ = value.endTime_;
-    this.isValid_ = value.isValid_;
-  }
-  else if (typeof value === 'number') {
-    var startTime = value;
-
-    if (!(startTime < endTime))
-      throw new Error("Interval start time must be less than the end time");
-
-    this.startTime_ = startTime;
-    this.endTime_ = endTime;
-    this.isValid_ = true;
-  }
-  else {
-    var isValid = (value ? true : false);
-
-    this.startTime_ = -Number.MAX_VALUE;
-    this.endTime_ = -Number.MAX_VALUE;
-    this.isValid_ = isValid;
-  }
-};
-
-exports.Interval = Interval;
-
-/**
- * Set this interval to have the same values as the other interval.
- * @param {Interval} other The other Interval with values to copy.
- */
-Interval.prototype.set = function(other)
-{
-  this.startTime_ = other.startTime_;
-  this.endTime_ = other.endTime_;
-  this.isValid_ = other.isValid_;
-};
-
-/**
- * Check if the time point is in this interval.
- * @param {number} timePoint The time point to check as milliseconds since
- * Jan 1, 1970 UTC.
- * @return {boolean} True if timePoint is in this interval.
- * @throws Error if this Interval is invalid.
- */
-Interval.prototype.covers = function(timePoint)
-{
-  if (!this.isValid_)
-    throw new Error("Interval.covers: This Interval is invalid");
-
-  if (this.isEmpty())
-    return false;
-  else
-    return this.startTime_ <= timePoint && timePoint < this.endTime_;
-};
-
-/**
- * Set this Interval to the intersection of this and the other interval.
- * This and the other interval should be valid but either can be empty.
- * @param {Interval} interval The other Interval to intersect with.
- * @return {Interval} This Interval.
- * @throws Error if this Interval or the other interval is invalid.
- */
-Interval.prototype.intersectWith = function(interval)
-{
-  if (!this.isValid_)
-    throw new Error("Interval.intersectWith: This Interval is invalid");
-  if (!interval.isValid_)
-    throw new Error("Interval.intersectWith: The other Interval is invalid");
-
-  if (this.isEmpty() || interval.isEmpty()) {
-    // If either is empty, the result is empty.
-    this.startTime_ = this.endTime_;
-    return this;
-  }
-
-  if (this.startTime_ >= interval.endTime_ || this.endTime_ <= interval.startTime_) {
-    // The two intervals don't have an intersection, so the result is empty.
-    this.startTime_ = this.endTime_;
-    return this;
-  }
-
-  // Get the start time.
-  if (this.startTime_ <= interval.startTime_)
-    this.startTime_ = interval.startTime_;
-
-  // Get the end time.
-  if (this.endTime_ > interval.endTime_)
-    this.endTime_ = interval.endTime_;
-
-  return this;
-};
-
-/**
- * Set this Interval to the union of this and the other interval.
- * This and the other interval should be valid but either can be empty.
- * This and the other interval should have an intersection. (Contiguous
- * intervals are not allowed.)
- * @param {Interval} interval The other Interval to union with.
- * @return {Interval} This Interval.
- * @throws Error if this Interval or the other interval is invalid, or if the
- * two intervals do not have an intersection.
- */
-Interval.prototype.unionWith = function(interval)
-{
-  if (!this.isValid_)
-    throw new Error("Interval.intersectWith: This Interval is invalid");
-  if (!interval.isValid_)
-    throw new Error("Interval.intersectWith: The other Interval is invalid");
-
-  if (this.isEmpty()) {
-    // This interval is empty, so use the other.
-    this.startTime_ = interval.startTime_;
-    this.endTime_ = interval.endTime_;
-    return this;
-  }
-
-  if (interval.isEmpty())
-    // The other interval is empty, so keep using this one.
-    return this;
-
-  if (this.startTime_ >= interval.endTime_ || this.endTime_ <= interval.startTime_)
-    throw new Error
-      ("Interval.unionWith: The two intervals do not have an intersection");
-
-  // Get the start time.
-  if (this.startTime_ > interval.startTime_)
-    this.startTime_ = interval.startTime_;
-
-  // Get the end time.
-  if (this.endTime_ < interval.endTime_)
-    this.endTime_ = interval.endTime_;
-
-  return this;
-};
-
-/**
- * Get the start time.
- * @return {number} The start time as milliseconds since Jan 1, 1970 UTC.
- * @throws Error if this Interval is invalid.
- */
-Interval.prototype.getStartTime = function()
-{
-  if (!this.isValid_)
-    throw new Error("Interval.getStartTime: This Interval is invalid");
-  return this.startTime_;
-};
-
-/**
- * Get the end time.
- * @return {number} The end time as milliseconds since Jan 1, 1970 UTC.
- * @throws Error if this Interval is invalid.
- */
-Interval.prototype.getEndTime = function()
-{
-  if (!this.isValid_)
-    throw new Error("Interval.getEndTime: This Interval is invalid");
-  return this.endTime_;
-};
-
-/**
- * Check if this Interval is valid.
- * @return {boolean} True if this interval is valid, false if invalid.
- */
-Interval.prototype.isValid = function() { return this.isValid_; };
-
-/**
- * Check if this Interval is empty.
- * @return {boolean} True if this Interval is empty (start time equals end time),
- * false if not.
- * @throws Error if this Interval is invalid.
- */
-Interval.prototype.isEmpty = function()
-{
-  if (!this.isValid_)
-    throw new Error("Interval.isEmpty: This Interval is invalid");
-  return this.startTime_ == this.endTime_;
-};
-/**
- * Copyright (C) 2015-2019 Regents of the University of California.
- * @author: Jeff Thompson <jefft0@remap.ucla.edu>
- * @author: From ndn-group-encrypt src/producer-db https://github.com/named-data/ndn-group-encrypt
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU Lesser General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU Lesser General Public License for more details.
- *
- * You should have received a copy of the GNU Lesser General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
- * A copy of the GNU Lesser General Public License is in the file COPYING.
- */
-
-/** @ignore */
-var SyncPromise = require('../util/sync-promise.js').SyncPromise;
-
-/**
- * ProducerDb is a base class for the storage of keys for the producer. It contains
- * one table that maps time slots (to the nearest hour) to the content key
- * created for that time slot. A subclass must implement the methods. For
- * example, see Sqlite3ProducerDb (for Nodejs) or IndexedDbProducerDb (for the
- * browser).
- * @note This class is an experimental feature. The API may change.
- * @constructor
- */
-var ProducerDb = function ProducerDb()
-{
-};
-
-exports.ProducerDb = ProducerDb;
-
-/**
- * Create a new ProducerDb.Error to report an error using ProducerDb
- * methods, wrapping the given error object.
- * Call with: throw new ProducerDb.Error(new Error("message")).
- * @constructor
- * @param {Error} error The exception created with new Error.
- */
-ProducerDb.Error = function ProducerDbError(error)
-{
-  if (error) {
-    error.__proto__ = ProducerDb.Error.prototype;
-    return error;
-  }
-};
-
-ProducerDb.Error.prototype = new Error();
-ProducerDb.Error.prototype.name = "ProducerDbError";
-
-/**
- * Check if a content key exists for the hour covering timeSlot.
- * @param {number} timeSlot The time slot as milliseconds since Jan 1, 1970 UTC.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise that returns true if there is a
- * content key for timeSlot (else false), or that is rejected with
- * ProducerDb.Error for a database error.
- */
-ProducerDb.prototype.hasContentKeyPromise = function(timeSlot, useSync)
-{
-  return SyncPromise.reject(new Error
-    ("ProducerDb.hasContentKeyPromise is not implemented"));
-};
-
-/**
- * Get the content key for the hour covering timeSlot.
- * @param {number} timeSlot The time slot as milliseconds since Jan 1, 1970 UTC.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise that returns a Blob with the encoded
- * key, or that is rejected with ProducerDb.Error if there is no key covering
- * timeSlot, or other database error
- */
-ProducerDb.prototype.getContentKeyPromise = function(timeSlot, useSync)
-{
-  return SyncPromise.reject(new Error
-    ("ProducerDb.getContentKeyPromise is not implemented"));
-};
-
-/**
- * Add key as the content key for the hour covering timeSlot.
- * @param {number} timeSlot The time slot as milliseconds since Jan 1, 1970 UTC.
- * @param {Blob} key The encoded key.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise that fulfills when the key is added,
- * or that is rejected with ProducerDb.Error if a key for the same hour already
- * exists in the database, or other database error.
- */
-ProducerDb.prototype.addContentKeyPromise = function
-  (timeSlot, key, useSync)
-{
-  return SyncPromise.reject(new Error
-    ("ProducerDb.addContentKeyPromise is not implemented"));
-};
-
-/**
- * Delete the content key for the hour covering timeSlot. If there is no key for
- * the time slot, do nothing.
- * @param {number} timeSlot The time slot as milliseconds since Jan 1, 1970 UTC.
- * @param {boolean} useSync (optional) If true then return a SyncPromise which
- * is already fulfilled. If omitted or false, this may return a SyncPromise or
- * an async Promise.
- * @return {Promise|SyncPromise} A promise that fulfills when the key is deleted
- * (or there is no such key), or that is rejected with ProducerDb.Error for a
- * database error.
- */
-ProducerDb.prototype.deleteContentKeyPromise = function(timeSlot, useSync)
-{
-  return SyncPromise.reject(new Error
-    ("ProducerDb.deleteContentKeyPromise is not implemented"));
-};
-
-/**
- * Get the hour-based time slot.
- * @param {number} timeSlot The time slot as milliseconds since Jan 1, 1970 UTC.
- * @return {number} The hour-based time slot as hours since Jan 1, 1970 UTC.
- */
-ProducerDb.getFixedTimeSlot = function(timeSlot)
-{
-  return Math.floor(Math.round(timeSlot) / 3600000.0);
-};
-/**
- * Copyright (C) 2015-2019 Regents of the University of California.
- * @author: Jeff Thompson <jefft0@remap.ucla.edu>
- * @author: From ndn-group-encrypt src/producer https://github.com/named-data/ndn-group-encrypt
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU Lesser General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU Lesser General Public License for more details.
- *
- * You should have received a copy of the GNU Lesser General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
- * A copy of the GNU Lesser General Public License is in the file COPYING.
- */
-
-/** @ignore */
-var Name = require('../name.js').Name; /** @ignore */
-var Interest = require('../interest.js').Interest; /** @ignore */
-var Data = require('../data.js').Data; /** @ignore */
-var Link = require('../link.js').Link; /** @ignore */
-var NetworkNack = require('../network-nack.js').NetworkNack; /** @ignore */
-var Exclude = require('../exclude.js').Exclude; /** @ignore */
-var Encryptor = require('./algo/encryptor.js').Encryptor; /** @ignore */
-var EncryptParams = require('./algo/encrypt-params.js').EncryptParams; /** @ignore */
-var EncryptAlgorithmType = require('./algo/encrypt-params.js').EncryptAlgorithmType; /** @ignore */
-var AesKeyParams = require('../security/key-params.js').AesKeyParams; /** @ignore */
-var AesAlgorithm = require('./algo/aes-algorithm.js').AesAlgorithm; /** @ignore */
-var Schedule = require('./schedule.js').Schedule; /** @ignore */
-var EncryptError = require('./encrypt-error.js').EncryptError; /** @ignore */
-var NdnCommon = require('../util/ndn-common.js').NdnCommon; /** @ignore */
-var SyncPromise = require('../util/sync-promise.js').SyncPromise;
-
-/**
- * A Producer manages content keys used to encrypt a data packet in the
- * group-based encryption protocol.
- * Create a Producer to use the given ProducerDb, Face and other values.
- *
- * A producer can produce data with a naming convention:
- *   /<prefix>/SAMPLE/<dataType>/[timestamp]
- *
- * The produced data packet is encrypted with a content key,
- * which is stored in the ProducerDb database.
- *
- * A producer also needs to produce data containing a content key
- * encrypted with E-KEYs. A producer can retrieve E-KEYs through the face,
- * and will re-try for at most repeatAttemps times when E-KEY retrieval fails.
- *
- * @param {Name} prefix The producer name prefix. This makes a copy of the Name.
- * @param {Name} dataType The dataType portion of the producer name. This makes
- * a copy of the Name.
- * @param {Face} face The face used to retrieve keys.
- * @param {KeyChain} keyChain The keyChain used to sign data packets.
- * @param {ProducerDb} database The ProducerDb database for storing keys.
- * @param {number} repeatAttempts (optional) The maximum retry for retrieving
- * keys. If omitted, use a default value of 3.
- * @param {Link} keyRetrievalLink (optional) The Link object to use in Interests
- * for key retrieval. This makes a copy of the Link object. If the Link object's
- * getDelegations().size() is zero, don't use it. If omitted, don't use a Link
- * object.
- * @note This class is an experimental feature. The API may change.
- * @constructor
- */
-var Producer = function Producer
-  (prefix, dataType, face, keyChain, database, repeatAttempts, keyRetrievalLink)
-{
-  this.face_ = face;
-  this.keyChain_ = keyChain;
-  this.database_ = database;
-  this.maxRepeatAttempts_ = (repeatAttempts == undefined ? 3 : repeatAttempts);
-  this.keyRetrievalLink_ =
-    (keyRetrievalLink == undefined ? Producer.NO_LINK : new Link(keyRetrievalLink));
-
-  // The map key is the key name URI string. The value is an object with fields
-  // "keyName" and "keyInfo" where "keyName" is the same Name used for the key
-  // name URI string, and "keyInfo" is the Producer.KeyInfo_.
-  // (Use a string because we can't use the Name object as the key in JavaScript.)
-  // (Also put the original Name in the value because we need to iterate over
-  // eKeyInfo_ and we don't want to rebuild the Name from the name URI string.)
-  this.eKeyInfo_ = {};
-  // The map key is the time stamp. The value is a Producer.KeyRequest_.
-  this.keyRequests_ = {};
-
-  var fixedPrefix = new Name(prefix);
-  var fixedDataType = new Name(dataType);
-
-  // Fill ekeyInfo_ with all permutations of dataType, including the 'E-KEY'
-  // component of the name. This will be used in createContentKey to send
-  // interests without reconstructing names every time.
-  fixedPrefix.append(Encryptor.NAME_COMPONENT_READ);
-  while (fixedDataType.size() > 0) {
-    var nodeName = new Name(fixedPrefix);
-    nodeName.append(fixedDataType);
-    nodeName.append(Encryptor.NAME_COMPONENT_E_KEY);
-
-    this.eKeyInfo_[nodeName.toUri()] =
-      { keyName: nodeName, keyInfo: new Producer.KeyInfo_() };
-    fixedDataType = fixedDataType.getPrefix(-1);
-  }
-  fixedPrefix.append(dataType);
-  this.namespace_ = new Name(prefix);
-  this.namespace_.append(Encryptor.NAME_COMPONENT_SAMPLE);
-  this.namespace_.append(dataType);
-};
-
-exports.Producer = Producer;
-
-/**
- * Create the content key corresponding to the timeSlot. This first checks if
- * the content key exists. For an existing content key, this returns the
- * content key name directly. If the key does not exist, this creates one and
- * encrypts it using the corresponding E-KEYs. The encrypted content keys are
- * passed to the onEncryptedKeys callback.
- * @param {number} timeSlot The time slot as milliseconds since Jan 1, 1970 UTC.
- * @param {function} onEncryptedKeys If this creates a content key, then this
- * calls onEncryptedKeys(keys) where keys is a list of encrypted content key
- * Data packets. If onEncryptedKeys is null, this does not use it.
- * NOTE: The library will log any exceptions thrown by this callback, but for
- * better error handling the callback should catch and properly handle any
- * exceptions.
- * @param {function} onContentKeyName This calls onContentKeyName(contentKeyName)
- * with the content key name for the time slot. If onContentKeyName is null,
- * this does not use it. (A callback is needed because of async database
- * operations.)
- * NOTE: The library will log any exceptions thrown by this callback, but for
- * better error handling the callback should catch and properly handle any
- * exceptions.
- * @param {function} onError (optional) This calls onError(errorCode, message)
- * for an error, where errorCode is from EncryptError.ErrorCode and message is a
- * string. If omitted, use a default callback which does nothing.
- * NOTE: The library will log any exceptions thrown by this callback, but for
- * better error handling the callback should catch and properly handle any
- * exceptions.
- */
-Producer.prototype.createContentKey = function
-  (timeSlot, onEncryptedKeys, onContentKeyName, onError)
-{
-  if (!onError)
-    onError = Producer.defaultOnError;
-
-  var hourSlot = Producer.getRoundedTimeSlot_(timeSlot);
-
-  // Create the content key name.
-  var contentKeyName = new Name(this.namespace_);
-  contentKeyName.append(Encryptor.NAME_COMPONENT_C_KEY);
-  contentKeyName.append(Schedule.toIsoString(hourSlot));
-
-  var contentKeyBits;
-  var thisProducer = this;
-
-  // Check if we have created the content key before.
-  this.database_.hasContentKeyPromise(timeSlot)
-  .then(function(exists) {
-    if (exists) {
-      if (onContentKeyName != null)
-        onContentKeyName(contentKeyName);
-      return;
-    }
-
-    // We haven't created the content key. Create one and add it into the database.
-    var aesParams = new AesKeyParams(128);
-    contentKeyBits = AesAlgorithm.generateKey(aesParams).getKeyBits();
-    thisProducer.database_.addContentKeyPromise(timeSlot, contentKeyBits)
-    .then(function() {
-      // Now we need to retrieve the E-KEYs for content key encryption.
-      var timeCount = Math.round(timeSlot);
-      thisProducer.keyRequests_[timeCount] =
-        new Producer.KeyRequest_(thisProducer.getEKeyInfoSize_());
-      var keyRequest = thisProducer.keyRequests_[timeCount];
-
-      // Check if the current E-KEYs can cover the content key.
-      var timeRange = new Exclude();
-      Producer.excludeAfter
-        (timeRange, new Name.Component(Schedule.toIsoString(timeSlot)));
-      for (var keyNameUri in thisProducer.eKeyInfo_) {
-         // For each current E-KEY.
-        var entry = thisProducer.eKeyInfo_[keyNameUri];
-        var keyInfo = entry.keyInfo;
-        if (timeSlot < keyInfo.beginTimeSlot || timeSlot >= keyInfo.endTimeSlot) {
-          // The current E-KEY cannot cover the content key, so retrieve one.
-          keyRequest.repeatAttempts[keyNameUri] = 0;
-          thisProducer.sendKeyInterest_
-            (new Interest(entry.keyName).setExclude(timeRange).setChildSelector(1),
-             timeSlot, onEncryptedKeys, onError);
-        }
-        else {
-          // The current E-KEY can cover the content key.
-          // Encrypt the content key directly.
-          var eKeyName = new Name(entry.keyName);
-          eKeyName.append(Schedule.toIsoString(keyInfo.beginTimeSlot));
-          eKeyName.append(Schedule.toIsoString(keyInfo.endTimeSlot));
-          thisProducer.encryptContentKeyPromise_
-            (keyInfo.keyBits, eKeyName, timeSlot, onEncryptedKeys, onError);
-        }
-      }
-
-      if (onContentKeyName != null)
-        onContentKeyName(contentKeyName);
-    });
-  });
-};
-
-/**
- * Encrypt the given content with the content key that covers timeSlot, and
- * update the data packet with the encrypted content and an appropriate data
- * name.
- * @param {Data} data An empty Data object which is updated.
- * @param {number} timeSlot The time slot as milliseconds since Jan 1, 1970 UTC.
- * @param {Blob} content The content to encrypt.
- * @param {function} onComplete This calls onComplete() when the data packet has
- * been updated.
- * NOTE: The library will log any exceptions thrown by this callback, but for
- * better error handling the callback should catch and properly handle any
- * exceptions.
- * @param {function} onError (optional) This calls onError(errorCode, message)
- * for an error, where errorCode is from EncryptError.ErrorCode and message is a
- * string. If omitted, use a default callback which does nothing.
- * NOTE: The library will log any exceptions thrown by this callback, but for
- * better error handling the callback should catch and properly handle any
- * exceptions.
- */
-Producer.prototype.produce = function
-  (data, timeSlot, content, onComplete, onError)
-{
-  if (!onError)
-    onError = Producer.defaultOnError;
-
-  var thisProducer = this;
-
-  // Get a content key.
-  this.createContentKey(timeSlot, null, function(contentKeyName) {
-    thisProducer.database_.getContentKeyPromise(timeSlot)
-    .then(function(contentKey) {
-      // Produce data.
-      var dataName = new Name(thisProducer.namespace_);
-      dataName.append(Schedule.toIsoString(timeSlot));
-
-      data.setName(dataName);
-      var params = new EncryptParams(EncryptAlgorithmType.AesCbc, 16);
-      return Encryptor.encryptData
-        (data, content, contentKeyName, contentKey, params);
-    })
-    .then(function() {
-      return thisProducer.keyChain_.signPromise(data);
-    })
-    .then(function() {
-      try {
-        onComplete();
-      } catch (ex) {
-        console.log("Error in onComplete: " + NdnCommon.getErrorWithStackTrace(ex));
-      }
-    }, function(error) {
-      try {
-        onError(EncryptError.ErrorCode.General, "" + error);
-      } catch (ex) {
-        console.log("Error in onError: " + NdnCommon.getErrorWithStackTrace(ex));
-      }
-    });
-  }, onError);
-};
-
-/**
- * The default onError callback which does nothing.
- */
-Producer.defaultOnError = function(errorCode, message)
-{
-  // Do nothing.
-};
-
-Producer.KeyInfo_ = function ProducerKeyInfo()
-{
-  this.beginTimeSlot = 0.0;
-  this.endTimeSlot = 0.0;
-  this.keyBits = null; // Blob
-};
-
-Producer.KeyRequest_ = function ProducerKeyRequest(interests)
-{
-  this.interestCount = interests; // number
-  // The map key is the name URI string. The value is an int count.
-  // (Use a string because we can't use the Name object as the key in JavaScript.)
-  this.repeatAttempts = {};
-  this.encryptedKeys = []; // of Data
-};
-
-/**
- * Round timeSlot to the nearest whole hour, so that we can store content keys
- * uniformly (by start of the hour).
- * @param {number} timeSlot The time slot as milliseconds since Jan 1, 1970 UTC.
- * @return {number} The start of the hour as milliseconds since Jan 1, 1970 UTC.
- */
-Producer.getRoundedTimeSlot_ = function(timeSlot)
-{
-  return Math.round(Math.floor(Math.round(timeSlot) / 3600000.0) * 3600000.0);
-}
-
-/**
- * Send an interest with the given name through the face with callbacks to
- * handleCoveringKey_, handleTimeout_ and handleNetworkNack_.
- * @param {Interest} interest The interest to send.
- * @param {number} timeSlot The time slot, passed to handleCoveringKey_,
- * handleTimeout_ and handleNetworkNack_.
- * @param {function} onEncryptedKeys The OnEncryptedKeys callback, passed to
- * handleCoveringKey_, handleTimeout_ and handleNetworkNack_.
- * @param {function} onError This calls onError(errorCode, message) for an error.
- */
-Producer.prototype.sendKeyInterest_ = function
-  (interest, timeSlot, onEncryptedKeys, onError)
-{
-  var thisProducer = this;
-
-  function onKey(interest, data) {
-    thisProducer.handleCoveringKey_
-      (interest, data, timeSlot, onEncryptedKeys, onError);
-  }
-
-  function onTimeout(interest) {
-    thisProducer.handleTimeout_(interest, timeSlot, onEncryptedKeys, onError);
-  }
-
-  function onNetworkNack(interest, networkNack) {
-    thisProducer.handleNetworkNack_
-      (interest, networkNack, timeSlot, onEncryptedKeys, onError);
-  }
-
-  var request;
-  if (this.keyRetrievalLink_.getDelegations().size() === 0)
-    // We can use the supplied interest without copying.
-    request = interest;
-  else {
-    // Copy the supplied interest and add the Link.
-    request = new Interest(interest);
-    // This will use a cached encoding if available.
-    request.setLinkWireEncoding(this.keyRetrievalLink_.wireEncode());
-  }
-
-  this.face_.expressInterest(request, onKey, onTimeout, onNetworkNack);
-};
-
-/**
- * This is called from an expressInterest timeout to update the state of
- * keyRequest. Re-express the interest if the number of retrials is less than
- * the max limit.
- * @param {Interest} interest The timed-out interest.
- * @param {number} timeSlot The time slot as milliseconds since Jan 1, 1970 UTC.
- * @param {function} onEncryptedKeys When there are no more interests to process,
- * this calls onEncryptedKeys(keys) where keys is a list of encrypted content
- * key Data packets. If onEncryptedKeys is null, this does not use it.
- * @param {function} onError This calls onError(errorCode, message) for an error.
- */
-Producer.prototype.handleTimeout_ = function
-  (interest, timeSlot, onEncryptedKeys, onError)
-{
-  var timeCount = Math.round(timeSlot);
-  var keyRequest = this.keyRequests_[timeCount];
-
-  var interestName = interest.getName();
-  var interestNameUri = interestName.toUri();
-
-  if (keyRequest.repeatAttempts[interestNameUri] < this.maxRepeatAttempts_) {
-    // Increase the retrial count.
-    ++keyRequest.repeatAttempts[interestNameUri];
-    this.sendKeyInterest_(interest, timeSlot, onEncryptedKeys, onError);
-  }
-  else
-    // Treat an eventual timeout as a network Nack.
-    this.handleNetworkNack_
-      (interest, new NetworkNack(), timeSlot, onEncryptedKeys, onError);
-};
-
-/**
- * This is called from an expressInterest OnNetworkNack to handle a network
- * Nack for the E-KEY requested through the Interest. Decrease the outstanding
- * E-KEY interest count for the C-KEY corresponding to the timeSlot.
- * @param {Interest} interest The interest given to expressInterest.
- * @param {NetworkNack} networkNack The returned NetworkNack (unused).
- * @param {number} timeSlot The time slot as milliseconds since Jan 1, 1970 UTC.
- * @param {function} onEncryptedKeys When there are no more interests to process,
- * this calls onEncryptedKeys(keys) where keys is a list of encrypted content
- * key Data packets. If onEncryptedKeys is null, this does not use it.
- */
-Producer.prototype.handleNetworkNack_ = function
-  (interest, networkNack, timeSlot, onEncryptedKeys, onError)
-{
-  // We have run out of options....
-  var timeCount = Math.round(timeSlot);
-  this.updateKeyRequest_
-    (this.keyRequests_[timeCount], timeCount, onEncryptedKeys);
-};
-
-/**
- * Decrease the count of outstanding E-KEY interests for the C-KEY for
- * timeCount. If the count decreases to 0, invoke onEncryptedKeys.
- * @param {Producer.KeyRequest_} keyRequest The KeyRequest with the
- * interestCount to update.
- * @param {number} timeCount The time count for indexing keyRequests_.
- * @param {function} onEncryptedKeys When there are no more interests to
- * process, this calls onEncryptedKeys(keys) where keys is a list of encrypted
- * content key Data packets. If onEncryptedKeys is null, this does not use it.
- */
-Producer.prototype.updateKeyRequest_ = function
-  (keyRequest, timeCount, onEncryptedKeys)
-{
-  --keyRequest.interestCount;
-  if (keyRequest.interestCount == 0 && onEncryptedKeys != null) {
-    try {
-      onEncryptedKeys(keyRequest.encryptedKeys);
-    } catch (ex) {
-      console.log("Error in onEncryptedKeys: " + NdnCommon.getErrorWithStackTrace(ex));
-    }
-    delete this.keyRequests_[timeCount];
-  }
-};
-
-/**
- * This is called from an expressInterest OnData to check that the encryption
- * key contained in data fits the timeSlot. This sends a refined interest if
- * required.
- * @param {Interest} interest The interest given to expressInterest.
- * @param {Data} data The fetched Data packet.
- * @param {number} timeSlot The time slot as milliseconds since Jan 1, 1970 UTC.
- * @param {function} onEncryptedKeys When there are no more interests to process,
- * this calls onEncryptedKeys(keys) where keys is a list of encrypted content
- * key Data packets. If onEncryptedKeys is null, this does not use it.
- * @param {function} onError This calls onError(errorCode, message) for an error.
- */
-Producer.prototype.handleCoveringKey_ = function
-  (interest, data, timeSlot, onEncryptedKeys, onError)
-{
-  var timeCount = Math.round(timeSlot);
-  var keyRequest = this.keyRequests_[timeCount];
-
-  var interestName = interest.getName();
-  var interestNameUrl = interestName.toUri();
-  var keyName = data.getName();
-
-  var begin = Schedule.fromIsoString
-    (keyName.get(Producer.START_TIME_STAMP_INDEX).getValue().toString());
-  var end = Schedule.fromIsoString
-    (keyName.get(Producer.END_TIME_STAMP_INDEX).getValue().toString());
-
-  if (timeSlot >= end) {
-    // If the received E-KEY covers some earlier period, try to retrieve an
-    // E-KEY covering a later one.
-    var timeRange = new Exclude(interest.getExclude());
-    Producer.excludeBefore(timeRange, keyName.get(Producer.START_TIME_STAMP_INDEX));
-    keyRequest.repeatAttempts[interestNameUrl] = 0;
-    this.sendKeyInterest_
-      (new Interest(interestName).setExclude(timeRange).setChildSelector(1),
-       timeSlot, onEncryptedKeys, onError);
-  }
-  else {
-    // If the received E-KEY covers the content key, encrypt the content.
-    var encryptionKey = data.getContent();
-    var thisProducer = this;
-    this.encryptContentKeyPromise_
-      (encryptionKey, keyName, timeSlot, onEncryptedKeys, onError)
-    .then(function(success) {
-      if (success) {
-        var keyInfo = thisProducer.eKeyInfo_[interestNameUrl].keyInfo;
-        keyInfo.beginTimeSlot = begin;
-        keyInfo.endTimeSlot = end;
-        keyInfo.keyBits = encryptionKey;
-      }
-    });
-  }
-};
-
-/**
- * Get the content key from the database_ and encrypt it for the timeSlot
- * using encryptionKey.
- * @param {Blob} encryptionKey The encryption key value.
- * @param {Name} eKeyName The key name for the EncryptedContent.
- * @param {number} timeSlot The time slot as milliseconds since Jan 1, 1970 UTC.
- * @param {function} onEncryptedKeys When there are no more interests to process,
- * this calls onEncryptedKeys(keys) where keys is a list of encrypted content
- * key Data packets. If onEncryptedKeys is null, this does not use it.
- * @param {function} onError This calls onError(errorCode, message) for an error.
- * @return {Promise} A promise that returns true if encryption succeeds,
- * otherwise false.
- */
-Producer.prototype.encryptContentKeyPromise_ = function
-  (encryptionKey, eKeyName, timeSlot, onEncryptedKeys, onError)
-{
-  var timeCount = Math.round(timeSlot);
-  var keyRequest = this.keyRequests_[timeCount];
-
-  var keyName = new Name(this.namespace_);
-  keyName.append(Encryptor.NAME_COMPONENT_C_KEY);
-  keyName.append(Schedule.toIsoString(Producer.getRoundedTimeSlot_(timeSlot)));
-
-  var cKeyData;
-  var thisProducer = this;
-
-  return this.database_.getContentKeyPromise(timeSlot)
-  .then(function(contentKey) {
-    cKeyData = new Data();
-    cKeyData.setName(keyName);
-    var params = new EncryptParams(EncryptAlgorithmType.RsaOaep);
-    return Encryptor.encryptDataPromise
-      (cKeyData, contentKey, eKeyName, encryptionKey, params);
-  })
-  .then(function() {
-    return SyncPromise.resolve(true);
-  }, function(error) {
-    try {
-      onError(EncryptError.ErrorCode.EncryptionFailure,
-              "encryptData failed: " + error);
-    } catch (ex) {
-      console.log("Error in onError: " + NdnCommon.getErrorWithStackTrace(ex));
-    }
-    return SyncPromise.resolve(false);
-  })
-  .then(function(success) {
-    if (success) {
-      return thisProducer.keyChain_.signPromise(cKeyData)
-      .then(function() {
-        keyRequest.encryptedKeys.push(cKeyData);
-        thisProducer.updateKeyRequest_(keyRequest, timeCount, onEncryptedKeys);
-        return SyncPromise.resolve(true);
-      });
-    }
-    else
-      return SyncPromise.resolve(false);
-  });
-};
-
-Producer.prototype.getEKeyInfoSize_ = function()
-{
-  // Note: This is really a method to find the key count in any object, but we
-  // don't want to claim that it is a tested and general utility method.
-  var size = 0;
-  for (key in this.eKeyInfo_) {
-    if (this.eKeyInfo_.hasOwnProperty(key))
-      ++size;
-  }
-
-  return size;
-};
-
-// TODO: Move this to be the main representation inside the Exclude object.
-/**
- * Create a new ExcludeEntry.
- * @param {Name.Component} component
- * @param {boolean} anyFollowsComponent
- */
-Producer.ExcludeEntry = function ExcludeEntry(component, anyFollowsComponent)
-{
-  this.component_ = component;
-  this.anyFollowsComponent_ = anyFollowsComponent;
-};
-
-/**
- * Create a list of ExcludeEntry from the Exclude object.
- * @param {Exclude} exclude The Exclude object to read.
- * @return {Array<ExcludeEntry>} A new array of ExcludeEntry.
- */
-Producer.getExcludeEntries = function(exclude)
-{
-  var entries = [];
-
-  for (var i = 0; i < exclude.size(); ++i) {
-    if (exclude.get(i) == Exclude.ANY) {
-      if (entries.length == 0)
-        // Add a "beginning ANY".
-        entries.push(new Producer.ExcludeEntry(new Name.Component(), true));
-      else
-        // Set anyFollowsComponent of the final component.
-        entries[entries.length - 1].anyFollowsComponent_ = true;
-    }
-    else
-      entries.push(new Producer.ExcludeEntry(exclude.get(i), false));
-  }
-
-  return entries;
-};
-
-/**
- * Set the Exclude object from the array of ExcludeEntry.
- * @param {Exclude} exclude The Exclude object to update.
- * @param {Array<ExcludeEntry>} entries The array of ExcludeEntry.
- */
-Producer.setExcludeEntries = function(exclude, entries)
-{
-  exclude.clear();
-
-  for (var i = 0; i < entries.length; ++i) {
-    var entry = entries[i];
-
-    if (i == 0 && entry.component_.getValue().size() == 0 &&
-        entry.anyFollowsComponent_)
-      // This is a "beginning ANY".
-      exclude.appendAny();
-    else {
-      exclude.appendComponent(entry.component_);
-      if (entry.anyFollowsComponent_)
-        exclude.appendAny();
-    }
-  }
-};
-
-/**
- * Get the latest entry in the array whose component_ is less than or equal to
- * component.
- * @param {Array<ExcludeEntry>} entries The array of ExcludeEntry.
- * @param {Name.Component} component The component to compare.
- * @return {number} The index of the found entry, or -1 if not found.
- */
-Producer.findEntryBeforeOrAt = function(entries, component)
-{
-  var i = entries.length - 1;
-  while (i >= 0) {
-    if (entries[i].component_.compare(component) <= 0)
-      break;
-    --i;
-  }
-
-  return i;
-};
-
-/**
- * Exclude all components in the range beginning at "from".
- * @param {Exclude} exclude The Exclude object to update.
- * @param {Name.Component} from The first component in the exclude range.
- */
-Producer.excludeAfter = function(exclude, from)
-{
-  var entries = Producer.getExcludeEntries(exclude);
-
-  var iNewFrom;
-  var iFoundFrom = Producer.findEntryBeforeOrAt(entries, from);
-  if (iFoundFrom < 0) {
-    // There is no entry before "from" so insert at the beginning.
-    entries.splice(0, 0, new Producer.ExcludeEntry(from, true));
-    iNewFrom = 0;
-  }
-  else {
-    var foundFrom = entries[iFoundFrom];
-
-    if (!foundFrom.anyFollowsComponent_) {
-      if (foundFrom.component_.equals(from)) {
-        // There is already an entry with "from", so just set the "ANY" flag.
-        foundFrom.anyFollowsComponent_ = true;
-        iNewFrom = iFoundFrom;
-      }
-      else {
-        // Insert following the entry before "from".
-        entries.splice(iFoundFrom + 1, 0, new Producer.ExcludeEntry(from, true));
-        iNewFrom = iFoundFrom + 1;
-      }
-    }
-    else
-      // The entry before "from" already has an "ANY" flag, so do nothing.
-      iNewFrom = iFoundFrom;
-  }
-
-  // Remove intermediate entries since they are inside the range.
-  var iRemoveBegin = iNewFrom + 1;
-  var nRemoveNeeded = entries.length - iRemoveBegin;
-  entries.splice(iRemoveBegin, nRemoveNeeded);
-
-  Producer.setExcludeEntries(exclude, entries);
-};
-
-/**
- * Exclude all components in the range ending at "to".
- * @param {Exclude} exclude The Exclude object to update.
- * @param {Name.Component} to The last component in the exclude range.
- */
-Producer.excludeBefore = function(exclude, to)
-{
-  Producer.excludeRange(exclude, new Name.Component(), to);
-};
-
-/**
- * Exclude all components in the range beginning at "from" and ending at "to".
- * @param {Exclude} exclude The Exclude object to update.
- * @param {Name.Component} from The first component in the exclude range.
- * @param {Name.Component} to The last component in the exclude range.
- */
-Producer.excludeRange = function(exclude, from, to)
-{
-  if (from.compare(to) >= 0) {
-    if (from.compare(to) == 0)
-      throw new Error
-        ("excludeRange: from == to. To exclude a single component, sue excludeOne.");
-    else
-      throw new Error
-        ("excludeRange: from must be less than to. Invalid range: [" +
-         from.toEscapedString() + ", " + to.toEscapedString() + "]");
-  }
-
-  var entries = Producer.getExcludeEntries(exclude);
-
-  var iNewFrom;
-  var iFoundFrom = Producer.findEntryBeforeOrAt(entries, from);
-  if (iFoundFrom < 0) {
-    // There is no entry before "from" so insert at the beginning.
-    entries.splice(0, 0, new Producer.ExcludeEntry(from, true));
-    iNewFrom = 0;
-  }
-  else {
-    var foundFrom = entries[iFoundFrom];
-
-    if (!foundFrom.anyFollowsComponent_) {
-      if (foundFrom.component_.equals(from)) {
-        // There is already an entry with "from", so just set the "ANY" flag.
-        foundFrom.anyFollowsComponent_ = true;
-        iNewFrom = iFoundFrom;
-      }
-      else {
-        // Insert following the entry before "from".
-        entries.splice(iFoundFrom + 1, 0, new Producer.ExcludeEntry(from, true));
-        iNewFrom = iFoundFrom + 1;
-      }
-    }
-    else
-      // The entry before "from" already has an "ANY" flag, so do nothing.
-      iNewFrom = iFoundFrom;
-  }
-
-  // We have at least one "from" before "to", so we know this will find an entry.
-  var iFoundTo = Producer.findEntryBeforeOrAt(entries, to);
-  var foundTo = entries[iFoundTo];
-  if (iFoundTo == iNewFrom)
-    // Insert the "to" immediately after the "from".
-    entries.splice(iNewFrom + 1, 0, new Producer.ExcludeEntry(to, false));
-  else {
-    var iRemoveEnd;
-    if (!foundTo.anyFollowsComponent_) {
-      if (foundTo.component_.equals(to))
-        // The "to" entry already exists. Remove up to it.
-        iRemoveEnd = iFoundTo;
-      else {
-        // Insert following the previous entry, which will be removed.
-        entries.splice(iFoundTo + 1, 0, new Producer.ExcludeEntry(to, false));
-        iRemoveEnd = iFoundTo + 1;
-      }
-    }
-    else
-      // "to" follows a component which is already followed by "ANY", meaning
-      // the new range now encompasses it, so remove the component.
-      iRemoveEnd = iFoundTo + 1;
-
-    // Remove intermediate entries since they are inside the range.
-    var iRemoveBegin = iNewFrom + 1;
-    var nRemoveNeeded = iRemoveEnd - iRemoveBegin;
-    entries.splice(iRemoveBegin, nRemoveNeeded);
-  }
-
-  Producer.setExcludeEntries(exclude, entries);
-};
-
-Producer.START_TIME_STAMP_INDEX = -2;
-Producer.END_TIME_STAMP_INDEX = -1;
-Producer.NO_LINK = new Link();
-/**
- * Copyright (C) 2015-2019 Regents of the University of California.
- * @author: Jeff Thompson <jefft0@remap.ucla.edu>
- * @author: From ndn-group-encrypt src/repetitive-interval https://github.com/named-data/ndn-group-encrypt
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU Lesser General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU Lesser General Public License for more details.
- *
- * You should have received a copy of the GNU Lesser General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
- * A copy of the GNU Lesser General Public License is in the file COPYING.
- */
-
-/** @ignore */
-var Interval = require('./interval.js').Interval;
-
-/**
- * A RepetitiveInterval is an advanced interval which can repeat and can be used
- * to find a simple Interval that a time point falls in. Create a
- * RepetitiveInterval with one of these forms:
- * RepetitiveInterval() A RepetitiveInterval with one day duration, non-repeating..
- * RepetitiveInterval(startDate, endDate, intervalStartHour, intervalEndHour, nRepeats, repeatUnit).
- * RepetitiveInterval(repetitiveInterval).
- * @param {number} startDate The start date as milliseconds since Jan 1, 1970 UTC.
- * startDate must be earlier than or same as endDate. Or if repeatUnit is
- * RepetitiveInterval.RepeatUnit.NONE, then it must equal endDate.
- * @param {number} endDate The end date as milliseconds since Jan 1, 1970 UTC.
- * @param {number} intervalStartHour The start hour in the day, from 0 to 23.
- * intervalStartHour must be less than intervalEndHour.
- * @param {number} intervalEndHour The end hour in the day from 1 to 24.
- * @param {number} nRepeats (optional) Repeat the interval nRepeats repetitions,
- * every unit, until endDate. If ommitted, use 0.
- * @param {number} repeatUnit (optional) The unit of the repetition, from
- * RepetitiveInterval.RepeatUnit. If ommitted, use NONE. If this is NONE or
- * ommitted, then startDate must equal endDate.
- * @note This class is an experimental feature. The API may change.
- * @constructor
- */
-var RepetitiveInterval = function RepetitiveInterval
-  (startDate, endDate, intervalStartHour, intervalEndHour, nRepeats, repeatUnit)
-{
-  if (typeof startDate === 'object' && startDate instanceof RepetitiveInterval) {
-    // Make a copy.
-    repetitiveInterval = startDate;
-
-    this.startDate_ = repetitiveInterval.startDate_;
-    this.endDate_ = repetitiveInterval.endDate_;
-    this.intervalStartHour_ = repetitiveInterval.intervalStartHour_;
-    this.intervalEndHour_ = repetitiveInterval.intervalEndHour_;
-    this.nRepeats_ = repetitiveInterval.nRepeats_;
-    this.repeatUnit_ = repetitiveInterval.repeatUnit_;
-  }
-  else if (typeof startDate === 'number') {
-    if (nRepeats == undefined)
-      nRepeats = 0;
-    if (repeatUnit == undefined)
-      repeatUnit = RepetitiveInterval.RepeatUnit.NONE;
-
-    this.startDate_ = RepetitiveInterval.toDateOnlyMilliseconds_(startDate);
-    this.endDate_ = RepetitiveInterval.toDateOnlyMilliseconds_(endDate);
-    this.intervalStartHour_ = Math.round(intervalStartHour);
-    this.intervalEndHour_ = Math.round(intervalEndHour);
-    this.nRepeats_ = Math.round(nRepeats);
-    this.repeatUnit_ = repeatUnit;
-
-    // Validate.
-    if (!(this.intervalStartHour_ < this.intervalEndHour_))
-      throw new Error("ReptitiveInterval: startHour must be less than endHour");
-    if (!(this.startDate_ <= this.endDate_))
-      throw new Error
-        ("ReptitiveInterval: startDate must be earlier than or same as endDate");
-    if (!(this.intervalStartHour_ >= 0))
-      throw new Error("ReptitiveInterval: intervalStartHour must be non-negative");
-    if (!(this.intervalEndHour_ >= 1 && this.intervalEndHour_ <= 24))
-      throw new Error("ReptitiveInterval: intervalEndHour must be from 1 to 24");
-    if (this.repeatUnit_ == RepetitiveInterval.RepeatUnit.NONE) {
-      if (!(this.startDate_ == this.endDate_))
-        throw new Error
-          ("ReptitiveInterval: With RepeatUnit.NONE, startDate must equal endDate");
-    }
-  }
-  else {
-    // The default constructor.
-    this.startDate_ = -Number.MAX_VALUE;
-    this.endDate_ = -Number.MAX_VALUE;
-    this.intervalStartHour_ = 0;
-    this.intervalEndHour_ = 24;
-    this.nRepeats_ = 0;
-    this.repeatUnit_ = RepetitiveInterval.RepeatUnit.NONE;
-  }
-};
-
-exports.RepetitiveInterval = RepetitiveInterval;
-
-RepetitiveInterval.RepeatUnit = {
-  NONE:  0,
-  DAY:   1,
-  MONTH: 2,
-  YEAR:  3
-};
-
-/**
- * Get an interval that covers the time point. If there is no interval
- * covering the time point, this returns false for isPositive and returns a
- * negative interval.
- * @param {number} timePoint The time point as milliseconds since Jan 1, 1970 UTC.
- * @return {object} An associative array with fields
- * (isPositive, interval) where
- * isPositive is true if the returned interval is
- * positive or false if negative, and interval is the Interval covering the time
- * point or a negative interval if not found.
- */
-RepetitiveInterval.prototype.getInterval = function(timePoint)
-{
-  var isPositive;
-  var startTime;
-  var endTime;
-
-  if (!this.hasIntervalOnDate_(timePoint)) {
-    // There is no interval on the date of timePoint.
-    startTime = RepetitiveInterval.toDateOnlyMilliseconds_(timePoint);
-    endTime = RepetitiveInterval.toDateOnlyMilliseconds_(timePoint) +
-      24 * RepetitiveInterval.MILLISECONDS_IN_HOUR;
-    isPositive = false;
-  }
-  else {
-    // There is an interval on the date of timePoint.
-    startTime = RepetitiveInterval.toDateOnlyMilliseconds_(timePoint) +
-      this.intervalStartHour_ * RepetitiveInterval.MILLISECONDS_IN_HOUR;
-    endTime = RepetitiveInterval.toDateOnlyMilliseconds_(timePoint) +
-      this.intervalEndHour_ * RepetitiveInterval.MILLISECONDS_IN_HOUR;
-
-    // check if in the time duration
-    if (timePoint < startTime) {
-      endTime = startTime;
-      startTime = RepetitiveInterval.toDateOnlyMilliseconds_(timePoint);
-      isPositive = false;
-    }
-    else if (timePoint > endTime) {
-      startTime = endTime;
-      endTime = RepetitiveInterval.toDateOnlyMilliseconds_(timePoint) +
-        RepetitiveInterval.MILLISECONDS_IN_DAY;
-      isPositive = false;
-    }
-    else
-      isPositive = true;
-  }
-
-  return { isPositive: isPositive, interval: new Interval(startTime, endTime) };
-};
-
-/**
- * Compare this to the other RepetitiveInterval.
- * @param {RepetitiveInterval} other The other RepetitiveInterval to compare to.
- * @return {number} -1 if this is less than the other, 1 if greater and 0 if equal.
- */
-RepetitiveInterval.prototype.compare = function(other)
-{
-  if (this.startDate_ < other.startDate_)
-    return -1;
-  if (this.startDate_ > other.startDate_)
-    return 1;
-
-  if (this.endDate_ < other.endDate_)
-    return -1;
-  if (this.endDate_ > other.endDate_)
-    return 1;
-
-  if (this.intervalStartHour_ < other.intervalStartHour_)
-    return -1;
-  if (this.intervalStartHour_ > other.intervalStartHour_)
-    return 1;
-
-  if (this.intervalEndHour_ < other.intervalEndHour_)
-    return -1;
-  if (this.intervalEndHour_ > other.intervalEndHour_)
-    return 1;
-
-  if (this.nRepeats_ < other.nRepeats_)
-    return -1;
-  if (this.nRepeats_ > other.nRepeats_)
-    return 1;
-
-  if (this.repeatUnit_ < other.repeatUnit_)
-    return -1;
-  if (this.repeatUnit_ > other.repeatUnit_)
-    return 1;
-
-  return 0;
-};
-
-/**
- * Get the start date.
- * @return {number} The start date as milliseconds since Jan 1, 1970 UTC.
- */
-RepetitiveInterval.prototype.getStartDate = function()
-{
-  return this.startDate_;
-};
-
-/**
- * Get the end date.
- * @return {number} The end date as milliseconds since Jan 1, 1970 UTC.
- */
-RepetitiveInterval.prototype.getEndDate = function()
-{
-  return this.endDate_;
-};
-
-/**
- * Get the interval start hour.
- * @return {number} The interval start hour.
- */
-RepetitiveInterval.prototype.getIntervalStartHour = function()
-{
-  return this.intervalStartHour_;
-}
-
-/**
- * Get the interval end hour.
- * @return {number} The interval end hour.
- */
-RepetitiveInterval.prototype.getIntervalEndHour = function()
-{
-  return this.intervalEndHour_;
-};
-
-/**
- * Get the number of repeats.
- * @return {number} The number of repeats.
- */
-RepetitiveInterval.prototype.getNRepeats = function()
-{
-  return this.nRepeats_;
-};
-
-/**
- * Get the repeat unit.
- * @return {number} The repeat unit, from RepetitiveInterval.RepeatUnit.
- */
-RepetitiveInterval.prototype.getRepeatUnit = function()
-{
-  return this.repeatUnit_;
-};
-
-/**
- * Check if the date of the time point is in any interval.
- * @param {number} timePoint The time point as milliseconds since Jan 1, 1970 UTC.
- * @return {boolean} True if the date of the time point is in any interval.
- */
-RepetitiveInterval.prototype.hasIntervalOnDate_ = function(timePoint)
-{
-  var timePointDateMilliseconds = RepetitiveInterval.toDateOnlyMilliseconds_(timePoint);
-
-  if (timePointDateMilliseconds < this.startDate_ ||
-      timePointDateMilliseconds > this.endDate_)
-    return false;
-
-  if (this.repeatUnit_ == RepetitiveInterval.RepeatUnit.NONE)
-    return true;
-  else if (this.repeatUnit_ == RepetitiveInterval.RepeatUnit.DAY) {
-    var durationDays = (timePointDateMilliseconds - this.startDate_) /
-                        RepetitiveInterval.MILLISECONDS_IN_DAY;
-    if (durationDays % this.nRepeats_ == 0)
-      return true;
-  }
-  else {
-    var timePointDate = new Date(timePointDateMilliseconds);
-    var startDate = new Date(this.startDate_);
-
-    if (this.repeatUnit_ == RepetitiveInterval.RepeatUnit.MONTH &&
-             timePointDate.getUTCDate() == startDate.getUTCDate()) {
-      var yearDifference =
-        timePointDate.getUTCFullYear() - startDate.getUTCFullYear();
-      var monthDifference = 12 * yearDifference +
-        timePointDate.getUTCMonth() - startDate.getUTCMonth();
-      if (monthDifference % this.nRepeats_ == 0)
-        return true;
-    }
-    else if (this.repeatUnit_ == RepetitiveInterval.RepeatUnit.YEAR &&
-             timePointDate.getUTCDate() == startDate.getUTCDate() &&
-             timePointDate.getUTCMonth() == startDate.getUTCMonth()) {
-      var difference = timePointDate.getUTCFullYear() - startDate.getUTCFullYear();
-      if (difference % this.nRepeats_ == 0)
-        return true;
-    }
-  }
-
-  return false;
-};
-
-/**
- * Return a time point on the beginning of the date (without hours, minutes, etc.)
- * @param {number} timePoint The time point as milliseconds since Jan 1, 1970 UTC.
- * @return {number} A time point as milliseconds since Jan 1, 1970 UTC.
- */
-RepetitiveInterval.toDateOnlyMilliseconds_ = function(timePoint)
-{
-  var result = Math.round(timePoint);
-  result -= result % RepetitiveInterval.MILLISECONDS_IN_DAY;
-  return result;
-};
-
-RepetitiveInterval.MILLISECONDS_IN_HOUR = 3600 * 1000;
-RepetitiveInterval.MILLISECONDS_IN_DAY = 24 * 3600 * 1000;
-/**
- * Copyright (C) 2015-2019 Regents of the University of California.
- * @author: Jeff Thompson <jefft0@remap.ucla.edu>
- * @author: From ndn-group-encrypt src/schedule https://github.com/named-data/ndn-group-encrypt
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU Lesser General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU Lesser General Public License for more details.
- *
- * You should have received a copy of the GNU Lesser General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
- * A copy of the GNU Lesser General Public License is in the file COPYING.
- */
-
-/** @ignore */
-var Interval = require('./interval.js').Interval; /** @ignore */
-var RepetitiveInterval = require('./repetitive-interval.js').RepetitiveInterval; /** @ignore */
-var Tlv = require('../encoding/tlv/tlv.js').Tlv; /** @ignore */
-var TlvEncoder = require('../encoding/tlv/tlv-encoder.js').TlvEncoder; /** @ignore */
-var TlvDecoder = require('../encoding/tlv/tlv-decoder.js').TlvDecoder; /** @ignore */
-var Blob = require('../util/blob.js').Blob;
-
-/**
- * Schedule is used to manage the times when a member can access data using two
- * sets of RepetitiveInterval as follows. whiteIntervalList is an ordered
- * set for the times a member is allowed to access to data, and
- * blackIntervalList is for the times a member is not allowed.
- * Create a Schedule with one of these forms:
- * Schedule() A Schedule with empty whiteIntervalList and blackIntervalList.
- * Schedule(schedule). A copy of the given schedule.
- * @note This class is an experimental feature. The API may change.
- * @constructor
- */
-var Schedule = function Schedule(value)
-{
-  if (typeof value === 'object' && value instanceof Schedule) {
-    // Make a copy.
-    var schedule = value;
-
-    // RepetitiveInterval is immutable, so we don't need to make a deep copy.
-    this.whiteIntervalList_ = schedule.whiteIntervalList_.slice(0);
-    this.blackIntervalList_ = schedule.blackIntervalList_.slice(0);
-  }
-  else {
-    // The default constructor.
-    this.whiteIntervalList_ = [];
-    this.blackIntervalList_ = [];
-  }
-};
-
-exports.Schedule = Schedule;
-
-/**
- * Add the repetitiveInterval to the whiteIntervalList.
- * @param {RepetitiveInterval} repetitiveInterval The RepetitiveInterval to add.
- * If the list already contains the same RepetitiveInterval, this does nothing.
- * @return {Schedule} This Schedule so you can chain calls to add.
- */
-Schedule.prototype.addWhiteInterval = function(repetitiveInterval)
-{
-  // RepetitiveInterval is immutable, so we don't need to make a copy.
-  Schedule.sortedSetAdd_(this.whiteIntervalList_, repetitiveInterval);
-  return this;
-};
-
-/**
- * Add the repetitiveInterval to the blackIntervalList.
- * @param {RepetitiveInterval} repetitiveInterval The RepetitiveInterval to add.
- * If the list already contains the same RepetitiveInterval, this does nothing.
- * @return {Schedule} This Schedule so you can chain calls to add.
- */
-Schedule.prototype.addBlackInterval = function(repetitiveInterval)
-{
-  // RepetitiveInterval is immutable, so we don't need to make a copy.
-  Schedule.sortedSetAdd_(this.blackIntervalList_, repetitiveInterval);
-  return this;
-};
-
-/**
- * Get the interval that covers the time stamp. This iterates over the two
- * repetitive interval sets and find the shortest interval that allows a group
- * member to access the data. If there is no interval covering the time stamp,
- * this returns false for isPositive and a negative interval.
- * @param {number} timeStamp The time stamp as milliseconds since Jan 1, 1970 UTC.
- * @return {object} An associative array with fields
- * (isPositive, interval) where
- * isPositive is true if the returned interval is positive or false if negative,
- * and interval is the Interval covering the time stamp, or a negative interval
- * if not found.
- */
-Schedule.prototype.getCoveringInterval = function(timeStamp)
-{
-  var blackPositiveResult = new Interval(true);
-  var whitePositiveResult = new Interval(true);
-
-  var blackNegativeResult = new Interval();
-  var whiteNegativeResult = new Interval();
-
-  // Get the black result.
-  Schedule.calculateIntervalResult_
-    (this.blackIntervalList_, timeStamp, blackPositiveResult, blackNegativeResult);
-
-  // If the black positive result is not empty, then isPositive must be false.
-  if (!blackPositiveResult.isEmpty())
-    return { isPositive: false, interval: blackPositiveResult };
-
-  // Get the whiteResult.
-  Schedule.calculateIntervalResult_
-    (this.whiteIntervalList_, timeStamp, whitePositiveResult, whiteNegativeResult);
-
-  if (whitePositiveResult.isEmpty() && !whiteNegativeResult.isValid()) {
-    // There is no white interval covering the time stamp.
-    // Return false and a 24-hour interval.
-    var timeStampDateOnly =
-      RepetitiveInterval.toDateOnlyMilliseconds_(timeStamp);
-    return { isPositive: false,
-             interval:  new Interval
-               (timeStampDateOnly,
-                timeStampDateOnly + RepetitiveInterval.MILLISECONDS_IN_DAY) };
-  }
-
-  if (!whitePositiveResult.isEmpty()) {
-    // There is white interval covering the time stamp.
-    // Return true and calculate the intersection.
-    if (blackNegativeResult.isValid())
-      return { isPositive: true,
-               interval: whitePositiveResult.intersectWith(blackNegativeResult) };
-    else
-      return  { isPositive: true, interval: whitePositiveResult };
-  }
-  else
-    // There is no white interval covering the time stamp.
-    // Return false.
-    return { isPositive: false, interval: whiteNegativeResult };
-};
-
-/**
- * Encode this Schedule.
- * @return {Blob} The encoded buffer.
- */
-Schedule.prototype.wireEncode = function()
-{
-  // For now, don't use WireFormat and hardcode to use TLV since the encoding
-  // doesn't go out over the wire, only into the local SQL database.
-  var encoder = new TlvEncoder(256);
-  var saveLength = encoder.getLength();
-
-  // Encode backwards.
-  // Encode the blackIntervalList.
-  var saveLengthForList = encoder.getLength();
-  for (var i = this.blackIntervalList_.length - 1; i >= 0; i--)
-    Schedule.encodeRepetitiveInterval_(this.blackIntervalList_[i], encoder);
-  encoder.writeTypeAndLength
-    (Tlv.Encrypt_BlackIntervalList, encoder.getLength() - saveLengthForList);
-
-  // Encode the whiteIntervalList.
-  saveLengthForList = encoder.getLength();
-  for (var i = this.whiteIntervalList_.length - 1; i >= 0; i--)
-    Schedule.encodeRepetitiveInterval_(this.whiteIntervalList_[i], encoder);
-  encoder.writeTypeAndLength
-    (Tlv.Encrypt_WhiteIntervalList, encoder.getLength() - saveLengthForList);
-
-  encoder.writeTypeAndLength
-    (Tlv.Encrypt_Schedule, encoder.getLength() - saveLength);
-
-  return new Blob(encoder.getOutput(), false);
-};
-
-/**
- * Decode the input and update this Schedule object.
- * @param {Blob|Buffer} input The input buffer to decode. For Buffer, this reads
- * from position() to limit(), but does not change the position.
- * @throws DecodingException For invalid encoding.
- */
-Schedule.prototype.wireDecode = function(input)
-{
-  // If input is a blob, get its buf().
-  var decodeBuffer = typeof input === 'object' && input instanceof Blob ?
-    input.buf() : input;
-
-  // For now, don't use WireFormat and hardcode to use TLV since the encoding
-  // doesn't go out over the wire, only into the local SQL database.
-  var decoder = new TlvDecoder(decodeBuffer);
-
-  var endOffset = decoder.readNestedTlvsStart(Tlv.Encrypt_Schedule);
-
-  // Decode the whiteIntervalList.
-  this.whiteIntervalList_ = [];
-  var listEndOffset = decoder.readNestedTlvsStart(Tlv.Encrypt_WhiteIntervalList);
-  while (decoder.getOffset() < listEndOffset)
-    Schedule.sortedSetAdd_
-      (this.whiteIntervalList_, Schedule.decodeRepetitiveInterval_(decoder));
-  decoder.finishNestedTlvs(listEndOffset);
-
-  // Decode the blackIntervalList.
-  this.blackIntervalList_ = [];
-  listEndOffset = decoder.readNestedTlvsStart(Tlv.Encrypt_BlackIntervalList);
-  while (decoder.getOffset() < listEndOffset)
-    Schedule.sortedSetAdd_
-      (this.blackIntervalList_, Schedule.decodeRepetitiveInterval_(decoder));
-  decoder.finishNestedTlvs(listEndOffset);
-
-  decoder.finishNestedTlvs(endOffset);
-};
-
-/**
- * Insert element into the list, sorted using element.compare(). If it is a
- * duplicate of an existing list element, don't add it.
- */
-Schedule.sortedSetAdd_ = function(list, element)
-{
-  // Find the index of the first element where it is not less than element.
-  var i = 0;
-  while (i < list.length) {
-    var comparison = list[i].compare(element);
-    if (comparison == 0)
-      // Don't add a duplicate.
-      return;
-    if (!(comparison < 0))
-      break;
-
-    ++i;
-  }
-
-  list.splice(i, 0, element);
-};
-
-/**
- * Encode the RepetitiveInterval as NDN-TLV to the encoder.
- * @param {RepetitiveInterval} repetitiveInterval The RepetitiveInterval to encode.
- * @param {TlvEncoder} encoder The TlvEncoder to receive the encoding.
- */
-Schedule.encodeRepetitiveInterval_ = function(repetitiveInterval, encoder)
-{
-  var saveLength = encoder.getLength();
-
-  // Encode backwards.
-  // The RepeatUnit enum has the same values as the encoding.
-  encoder.writeNonNegativeIntegerTlv
-    (Tlv.Encrypt_RepeatUnit, repetitiveInterval.getRepeatUnit());
-  encoder.writeNonNegativeIntegerTlv
-    (Tlv.Encrypt_NRepeats, repetitiveInterval.getNRepeats());
-  encoder.writeNonNegativeIntegerTlv
-    (Tlv.Encrypt_IntervalEndHour, repetitiveInterval.getIntervalEndHour());
-  encoder.writeNonNegativeIntegerTlv
-    (Tlv.Encrypt_IntervalStartHour, repetitiveInterval.getIntervalStartHour());
-  // Use Blob to convert the string to UTF8 encoding.
-  encoder.writeBlobTlv(Tlv.Encrypt_EndDate,
-    new Blob(Schedule.toIsoString(repetitiveInterval.getEndDate())).buf());
-  encoder.writeBlobTlv(Tlv.Encrypt_StartDate,
-    new Blob(Schedule.toIsoString(repetitiveInterval.getStartDate())).buf());
-
-  encoder.writeTypeAndLength
-    (Tlv.Encrypt_RepetitiveInterval, encoder.getLength() - saveLength);
-};
-
-/**
- * Decode the input as an NDN-TLV RepetitiveInterval.
- * @param {TlvDecoder} decoder The decoder with the input to decode.
- * @return {RepetitiveInterval} A new RepetitiveInterval with the decoded result.
- */
-Schedule.decodeRepetitiveInterval_ = function(decoder)
-{
-  var endOffset = decoder.readNestedTlvsStart(Tlv.Encrypt_RepetitiveInterval);
-
-  // Use Blob to convert UTF8 to a string.
-  var startDate = Schedule.fromIsoString
-    (new Blob(decoder.readBlobTlv(Tlv.Encrypt_StartDate), true).toString());
-  var endDate = Schedule.fromIsoString
-    (new Blob(decoder.readBlobTlv(Tlv.Encrypt_EndDate), true).toString());
-  var startHour = decoder.readNonNegativeIntegerTlv(Tlv.Encrypt_IntervalStartHour);
-  var endHour = decoder.readNonNegativeIntegerTlv(Tlv.Encrypt_IntervalEndHour);
-  var nRepeats = decoder.readNonNegativeIntegerTlv(Tlv.Encrypt_NRepeats);
-
-  // The RepeatUnit enum has the same values as the encoding.
-  var repeatUnit = decoder.readNonNegativeIntegerTlv(Tlv.Encrypt_RepeatUnit);
-
-  decoder.finishNestedTlvs(endOffset);
-  return new RepetitiveInterval
-    (startDate, endDate, startHour, endHour, nRepeats, repeatUnit);
-};
-
-/**
- * A helper function to calculate black interval results or white interval
- * results.
- * @param {Array} list The set of RepetitiveInterval, which can be the white
- * list or the black list.
- * @param {number} timeStamp The time stamp as milliseconds since Jan 1, 1970 UTC.
- * @param {Interval} positiveResult The positive result which is updated.
- * @param {Interval} negativeResult The negative result which is updated.
- */
-Schedule.calculateIntervalResult_ = function
-  (list, timeStamp, positiveResult, negativeResult)
-{
-  for (var i = 0; i < list.length; ++i) {
-    var element = list[i];
-
-    var result = element.getInterval(timeStamp);
-    var tempInterval = result.interval;
-    if (result.isPositive == true)
-      positiveResult.unionWith(tempInterval);
-    else {
-      if (!negativeResult.isValid())
-        negativeResult.set(tempInterval);
-      else
-        negativeResult.intersectWith(tempInterval);
-    }
-  }
-};
-
-/**
- * Convert a UNIX timestamp to ISO time representation with the "T" in the middle.
- * @param {number} msSince1970 Timestamp as milliseconds since Jan 1, 1970 UTC.
- * @return {string} The string representation.
- */
-Schedule.toIsoString = function(msSince1970)
-{
-  var utcTime = new Date(Math.round(msSince1970));
-  return utcTime.getUTCFullYear() +
-         Schedule.to2DigitString(utcTime.getUTCMonth() + 1) +
-         Schedule.to2DigitString(utcTime.getUTCDate()) +
-         "T" +
-         Schedule.to2DigitString(utcTime.getUTCHours()) +
-         Schedule.to2DigitString(utcTime.getUTCMinutes()) +
-         Schedule.to2DigitString(utcTime.getUTCSeconds());
-};
-
-/**
- * A private method to zero pad an integer to 2 digits.
- * @param {number} x The number to pad.  Assume it is a non-negative integer.
- * @return {string} The padded string.
- */
-Schedule.to2DigitString = function(x)
-{
-  var result = x.toString();
-  return result.length === 1 ? "0" + result : result;
-};
-
-/**
- * Convert an ISO time representation with the "T" in the middle to a UNIX
- * timestamp.
- * @param {string} timeString The ISO time representation.
- * @return {number} The timestamp as milliseconds since Jan 1, 1970 UTC.
- */
-Schedule.fromIsoString = function(timeString)
-{
-  if (timeString.length != 15 || timeString.substr(8, 1) != 'T')
-    throw new Error("fromIsoString: Format is not the expected yyyymmddThhmmss");
-
-  return Date.UTC
-    (parseInt(timeString.substr(0, 4)),
-     parseInt(timeString.substr(4, 2) - 1),
-     parseInt(timeString.substr(6, 2)),
-     parseInt(timeString.substr(9, 2)),
-     parseInt(timeString.substr(11, 2)),
-     parseInt(timeString.substr(13, 2)));
-};
-/**
- * Copyright (C) 2015-2019 Regents of the University of California.
- * @author: Jeff Thompson <jefft0@remap.ucla.edu>
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU Lesser General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU Lesser General Public License for more details.
- *
- * You should have received a copy of the GNU Lesser General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
- * A copy of the GNU Lesser General Public License is in the file COPYING.
- */
-
-// Don't require modules since this is meant for the browser, not Node.js.
-
-/**
- * IndexedDbConsumerDb extends ConsumerDb to implement the storage of decryption
- * keys for the consumer using the browser's IndexedDB service.
- * Create an IndexedDbConsumerDb to use the given IndexedDB database name.
- * @param {string} databaseName IndexedDB database name.
- * @note This class is an experimental feature. The API may change.
- * @constructor
- */
-var IndexedDbConsumerDb = function IndexedDbConsumerDb(databaseName)
-{
-  ConsumerDb.call(this);
-
-  this.database = new Dexie(databaseName);
-  this.database.version(1).stores({
-    // "keyName" is the key name URI // string
-    //   (Note: In SQLite3, the key name is the TLV encoded bytes, but we can't
-    //   index on a byte array in IndexedDb.)
-    // "key" is the key bytes // Uint8Array
-    decryptionKeys: "keyName"
-  });
-  this.database.open();
-};
-
-IndexedDbConsumerDb.prototype = new ConsumerDb();
-IndexedDbConsumerDb.prototype.name = "IndexedDbConsumerDb";
-
-/**
- * Get the key with keyName from the database.
- * @param {Name} keyName The key name.
- * @param {boolean} useSync (optional) If true then return a rejected promise
- * since this only supports async code.
- * @return {Promise} A promise that returns a Blob with the encoded key (or an
- * isNull Blob if cannot find the key with keyName), or that is
- * rejected with ConsumerDb.Error for a database error.
- */
-IndexedDbConsumerDb.prototype.getKeyPromise = function(keyName, useSync)
-{
-  if (useSync)
-    return Promise.reject(new ConsumerDb.Error(new Error
-      ("IndexedDbConsumerDb.getKeyPromise is only supported for async")));
-
-  return this.database.decryptionKeys.get(keyName.toUri())
-  .then(function(decryptionKeysEntry) {
-    if (decryptionKeysEntry)
-      return Promise.resolve(new Blob(decryptionKeysEntry.key));
-    else
-      return Promise.resolve(new Blob());
-  })
-  .catch(function(ex) {
-    return Promise.reject(new ConsumerDb.Error(new Error
-      ("IndexedDbConsumerDb.getKeyPromise: Error: " + ex)));
-  });
-};
-
-/**
- * Add the key with keyName and keyBlob to the database.
- * @param {Name} keyName The key name.
- * @param {Blob} keyBlob The encoded key.
- * @param {boolean} useSync (optional) If true then return a rejected promise
- * since this only supports async code.
- * @return {Promise} A promise that fulfills when the key is added, or that
- * is rejected with ConsumerDb.Error if a key with the same keyName already
- * exists, or other database error.
- */
-IndexedDbConsumerDb.prototype.addKeyPromise = function(keyName, keyBlob, useSync)
-{
-  if (useSync)
-    return Promise.reject(new ConsumerDb.Error(new Error
-      ("IndexedDbConsumerDb.addKeyPromise is only supported for async")));
-
-  // Add rejects if the primary key already exists.
-  return this.database.decryptionKeys.add
-    ({ keyName: keyName.toUri(), key: keyBlob.buf() })
-  .catch(function(ex) {
-    return Promise.reject(new ConsumerDb.Error(new Error
-      ("IndexedDbConsumerDb.addKeyPromise: Error: " + ex)));
-  });
-};
-
-/**
- * Delete the key with keyName from the database. If there is no key with
- * keyName, do nothing.
- * @param {Name} keyName The key name.
- * @param {boolean} useSync (optional) If true then return a rejected promise
- * since this only supports async code.
- * @return {Promise} A promise that fulfills when the key is deleted (or there
- * is no such key), or that is rejected with ConsumerDb.Error for a database
- * error.
- */
-IndexedDbConsumerDb.prototype.deleteKeyPromise = function(keyName, useSync)
-{
-  if (useSync)
-    return Promise.reject(new ConsumerDb.Error(new Error
-      ("IndexedDbConsumerDb.deleteKeyPromise is only supported for async")));
-
-  return this.database.decryptionKeys.delete(keyName.toUri())
-  .catch(function(ex) {
-    return Promise.reject(new ConsumerDb.Error(new Error
-      ("IndexedDbConsumerDb.deleteKeyPromise: Error: " + ex)));
-  });
-};
-/**
- * Copyright (C) 2015-2019 Regents of the University of California.
- * @author: Jeff Thompson <jefft0@remap.ucla.edu>
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU Lesser General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU Lesser General Public License for more details.
- *
- * You should have received a copy of the GNU Lesser General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
- * A copy of the GNU Lesser General Public License is in the file COPYING.
- */
-
-// Don't require modules since this is meant for the browser, not Node.js.
-
-/**
- * IndexedDbGroupManagerDb extends GroupManagerDb to implement the storage of
- * data used by the GroupManager using the browser's IndexedDB service.
- * Create an IndexedDbGroupManagerDb to use the given IndexedDB database name.
- * @param {string} databaseName IndexedDB database name.
- * @note This class is an experimental feature. The API may change.
- * @constructor
- */
-var IndexedDbGroupManagerDb = function IndexedDbGroupManagerDb(databaseName)
-{
-  GroupManagerDb.call(this);
-
-  // The map key is the E-KEY name URI string. The value is the private key Blob.
-  // (Use a string because we can't use the Name object as the key in JavaScript.)
-  this.privateKeyBase_ = {};
-
-  this.database = new Dexie(databaseName);
-  this.database.version(1).stores({
-    // "scheduleId" is the schedule ID, auto incremented // number
-    // "scheduleName" is the schedule name, unique // string
-    // "schedule" is the TLV-encoded schedule // Uint8Array
-    schedules: "++scheduleId, &scheduleName",
-
-    // "memberNameUri" is the member name URI // string
-    //   (Note: In SQLite3, the member name index is the TLV encoded bytes, but
-    //   we can't index on a byte array in IndexedDb.)
-    //   (Note: The SQLite3 table also has an auto-incremented member ID primary
-    //   key, but is not used so we omit it to simplify.)
-    // "memberName" is the TLV-encoded member name (same as memberNameUri // Uint8Array
-    // "scheduleId" is the schedule ID, linked to the schedules table // number
-    //   (Note: The SQLite3 table has a foreign key to the schedules table with
-    //   cascade update and delete, but we have to handle it manually.)
-    // "keyName" is the TLV-encoded key name // Uint8Array
-    // "publicKey" is the encoded key bytes // Uint8Array
-    members: "memberNameUri, scheduleId",
-
-    // "eKeyNameUri" is the ekey name URI // string
-    //   (Note: In SQLite3, the member name index is the TLV encoded bytes, but
-    //   we can't index on a byte array in IndexedDb.)
-    //   (Note: The SQLite3 table also has an auto-incremented member ID primary
-    //   key, but is not used so we omit it to simplify.)
-    // "publicKey" is the encoded key bytes // Uint8Array
-    ekeys: "eKeyNameUri"
-  });
-  this.database.open();
-};
-
-IndexedDbGroupManagerDb.prototype = new GroupManagerDb();
-IndexedDbGroupManagerDb.prototype.name = "IndexedDbGroupManagerDb";
-
-////////////////////////////////////////////////////// Schedule management.
-
-/**
- * Check if there is a schedule with the given name.
- * @param {string} name The name of the schedule.
- * @param {boolean} useSync (optional) If true then return a rejected promise
- * since this only supports async code.
- * @return {Promise} A promise that returns true if there is a schedule (else
- * false), or that is rejected with GroupManagerDb.Error for a database error.
- */
-IndexedDbGroupManagerDb.prototype.hasSchedulePromise = function(name, useSync)
-{
-  if (useSync)
-    return Promise.reject(new GroupManagerDb.Error(new Error
-      ("IndexedDbGroupManagerDb.hasSchedulePromise is only supported for async")));
-
-  return this.getScheduleIdPromise_(name)
-  .then(function(scheduleId) {
-    return Promise.resolve(scheduleId != -1);
-  });
-};
-
-/**
- * List all the names of the schedules.
- * @param {boolean} useSync (optional) If true then return a rejected promise
- * since this only supports async code.
- * @return {Promise} A promise that returns a new array of string with the names
- * of all schedules, or that is rejected with GroupManagerDb.Error for a
- * database error.
- */
-IndexedDbGroupManagerDb.prototype.listAllScheduleNamesPromise = function(useSync)
-{
-  if (useSync)
-    return Promise.reject(new GroupManagerDb.Error(new Error
-      ("IndexedDbGroupManagerDb.listAllScheduleNamesPromise is only supported for async")));
-
-  var list = [];
-  return this.database.schedules.each(function(entry) {
-    list.push(entry.scheduleName);
-  })
-  .then(function() {
-    return Promise.resolve(list);
-  })
-  .catch(function(ex) {
-    return Promise.reject(new GroupManagerDb.Error(new Error
-      ("IndexedDbGroupManagerDb.listAllScheduleNamesPromise: Error: " + ex)));
-  });
-};
-
-/**
- * Get a schedule with the given name.
- * @param {string} name The name of the schedule.
- * @param {boolean} useSync (optional) If true then return a rejected promise
- * since this only supports async code.
- * @return {Promise} A promise that returns a new Schedule object, or that is
- * rejected with GroupManagerDb.Error if the schedule does not exist or other
- * database error.
- */
-IndexedDbGroupManagerDb.prototype.getSchedulePromise = function(name, useSync)
-{
-  if (useSync)
-    return Promise.reject(new GroupManagerDb.Error(new Error
-      ("IndexedDbGroupManagerDb.getSchedulePromise is only supported for async")));
-
-  var thisManager = this;
-  // Use getScheduleIdPromise_ to handle the search on the non-primary key.
-  return this.getScheduleIdPromise_(name)
-  .then(function(scheduleId) {
-    if (scheduleId != -1) {
-      return thisManager.database.schedules.get(scheduleId)
-      .then(function(entry) {
-        // We expect entry to be found, and don't expect an error decoding.
-        var schedule = new Schedule();
-        schedule.wireDecode(new Blob(entry.schedule, false));
-        return Promise.resolve(schedule);
-      })
-      .catch(function(ex) {
-        return Promise.reject(new GroupManagerDb.Error(new Error
-          ("IndexedDbGroupManagerDb.getSchedulePromise: Error: " + ex)));
-      });
-    }
-    else
-      return Promise.reject(new GroupManagerDb.Error(new Error
-        ("IndexedDbGroupManagerDb.getSchedulePromise: Cannot get the result from the database")));
-  });
-};
-
-/**
- * For each member using the given schedule, get the name and public key DER
- * of the member's key.
- * @param {string} name The name of the schedule.
- * @param {boolean} useSync (optional) If true then return a rejected promise
- * since this only supports async code.
- * @return {Promise} A promise that returns a new array of object (where
- * "keyName" is the Name of the public key and "publicKey" is the Blob of the
- * public key DER), or that is rejected with GroupManagerDb.Error for a database
- * error. Note that the member's identity name is keyName.getPrefix(-1). If the
- * schedule name is not found, the list is empty.
- */
-IndexedDbGroupManagerDb.prototype.getScheduleMembersPromise = function
-  (name, useSync)
-{
-  if (useSync)
-    return Promise.reject(new GroupManagerDb.Error(new Error
-      ("IndexedDbGroupManagerDb.getScheduleMembersPromise is only supported for async")));
-
-  var list = [];
-  var thisManager = this;
-  // There is only one matching schedule ID, so we can just look it up instead
-  // of doing a more complicated join.
-  return this.getScheduleIdPromise_(name)
-  .then(function(scheduleId) {
-    if (scheduleId == -1)
-      // Return the empty list.
-      return Promise.resolve(list);
-
-    var onEntryError = null;
-    return thisManager.database.members.where("scheduleId").equals(scheduleId)
-    .each(function(entry) {
-      try {
-        var keyName = new Name();
-        keyName.wireDecode(new Blob(entry.keyName, false), TlvWireFormat.get());
-
-        list.push({ keyName: keyName, publicKey: new Blob(entry.publicKey, false) });
-      } catch (ex) {
-        // We don't expect this to happen.
-        onEntryError = new GroupManagerDb.Error(new Error
-          ("IndexedDbGroupManagerDb.getScheduleMembersPromise: Error decoding name: " + ex));
-      }
-    })
-    .then(function() {
-      if (onEntryError)
-        // We got an error decoding.
-        return Promise.reject(onEntryError);
-      else
-        return Promise.resolve(list);
-    }, function(ex) {
-      return Promise.reject(new GroupManagerDb.Error(new Error
-        ("IndexedDbGroupManagerDb.getScheduleMembersPromise: Error: " + ex)));
-    });
-  });
-};
-
-/**
- * Add a schedule with the given name.
- * @param {string} name The name of the schedule. The name cannot be empty.
- * @param {Schedule} schedule The Schedule to add.
- * @param {boolean} useSync (optional) If true then return a rejected promise
- * since this only supports async code.
- * @return {Promise} A promise that fulfills when the schedule is added, or that
- * is rejected with GroupManagerDb.Error if a schedule with the same name
- * already exists, if the name is empty, or other database error.
- */
-IndexedDbGroupManagerDb.prototype.addSchedulePromise = function
-  (name, schedule, useSync)
-{
-  if (useSync)
-    return Promise.reject(new GroupManagerDb.Error(new Error
-      ("IndexedDbGroupManagerDb.addSchedulePromise is only supported for async")));
-
-  if (name.length == 0)
-    return Promise.reject(new GroupManagerDb.Error
-      ("IndexedDbGroupManagerDb.addSchedulePromise: The schedule name cannot be empty"));
-
-  // Add rejects if the primary key already exists.
-  return this.database.schedules.add
-    ({ scheduleName: name, schedule: schedule.wireEncode().buf() })
-  .catch(function(ex) {
-    return Promise.reject(new GroupManagerDb.Error(new Error
-      ("IndexedDbGroupManagerDb.addSchedulePromise: Error: " + ex)));
-  });
-};
-
-/**
- * Delete the schedule with the given name. Also delete members which use this
- * schedule. If there is no schedule with the name, then do nothing.
- * @param {string} name The name of the schedule.
- * @param {boolean} useSync (optional) If true then return a rejected promise
- * since this only supports async code.
- * @return {Promise} A promise that fulfills when the schedule is deleted (or
- * there is no such schedule), or that is rejected with GroupManagerDb.Error for
- * a database error.
- */
-IndexedDbGroupManagerDb.prototype.deleteSchedulePromise = function
-  (name, useSync)
-{
-  if (useSync)
-    return Promise.reject(new GroupManagerDb.Error(new Error
-      ("IndexedDbGroupManagerDb.deleteSchedulePromise is only supported for async")));
-
-  var scheduleId;
-  var thisManager = this;
-  return this.getScheduleIdPromise_(name)
-  .then(function(localScheduleId) {
-    scheduleId = localScheduleId;
-
-    // Get the members which use this schedule.
-    return thisManager.database.members.where("scheduleId").equals(scheduleId).toArray();
-  })
-  .then(function(membersEntries) {
-    // Delete the members.
-    var promises = membersEntries.map(function(entry) {
-      return thisManager.database.members.delete(entry.memberNameUri);
-    });
-    return Promise.all(promises);
-  })
-  .then(function() {
-    // Now delete the schedule.
-    return thisManager.database.schedules.delete(scheduleId);
-  })
-  .catch(function(ex) {
-    return Promise.reject(new GroupManagerDb.Error(new Error
-      ("IndexedDbGroupManagerDb.deleteSchedulePromise: Error: " + ex)));
-  });
-};
-
-/**
- * Rename a schedule with oldName to newName.
- * @param {string} oldName The name of the schedule to be renamed.
- * @param {string} newName The new name of the schedule. The name cannot be empty.
- * @param {boolean} useSync (optional) If true then return a rejected promise
- * since this only supports async code.
- * @return {Promise} A promise that fulfills when the schedule is renamed, or
- * that is rejected with GroupManagerDb.Error if a schedule with newName already
- * exists, if the schedule with oldName does not exist, if newName is empty, or
- * other database error.
- */
-IndexedDbGroupManagerDb.prototype.renameSchedulePromise = function
-  (oldName, newName, useSync)
-{
-  if (useSync)
-    return Promise.reject(new GroupManagerDb.Error(new Error
-      ("IndexedDbGroupManagerDb.renameSchedulePromise is only supported for async")));
-
-  if (newName.length == 0)
-    return Promise.reject(new GroupManagerDb.Error(new Error
-      ("IndexedDbGroupManagerDb.renameSchedule: The schedule newName cannot be empty")));
-
-  var thisManager = this;
-  return this.getScheduleIdPromise_(oldName)
-  .then(function(scheduleId) {
-    if (scheduleId == -1)
-      return Promise.reject(new GroupManagerDb.Error(new Error
-        ("IndexedDbGroupManagerDb.renameSchedule: The schedule oldName does not exist")));
-
-    return thisManager.database.schedules.update
-      (scheduleId, { scheduleName: newName })
-    .catch(function(ex) {
-      return Promise.reject(new GroupManagerDb.Error(new Error
-        ("IndexedDbGroupManagerDb.renameSchedulePromise: Error: " + ex)));
-    });
-  });
-};
-
-/**
- * Update the schedule with name and replace the old object with the given
- * schedule. Otherwise, if no schedule with name exists, a new schedule
- * with name and the given schedule will be added to database.
- * @param {string} name The name of the schedule. The name cannot be empty.
- * @param {Schedule} schedule The Schedule to update or add.
- * @param {boolean} useSync (optional) If true then return a rejected promise
- * since this only supports async code.
- * @return {Promise} A promise that fulfills when the schedule is updated, or
- * that is rejected with GroupManagerDb.Error if the name is empty, or other
- * database error.
- */
-IndexedDbGroupManagerDb.prototype.updateSchedulePromise = function
-  (name, schedule, useSync)
-{
-  if (useSync)
-    return Promise.reject(new GroupManagerDb.Error(new Error
-      ("IndexedDbGroupManagerDb.updateSchedulePromise is only supported for async")));
-
-  var thisManager = this;
-  return this.getScheduleIdPromise_(name)
-  .then(function(scheduleId) {
-    if (scheduleId == -1)
-      return thisManager.addSchedulePromise(name, schedule);
-
-    return thisManager.database.schedules.update
-      (scheduleId, { schedule: schedule.wireEncode().buf() })
-    .catch(function(ex) {
-      return Promise.reject(new GroupManagerDb.Error(new Error
-        ("IndexedDbGroupManagerDb.updateSchedulePromise: Error: " + ex)));
-    });
-  });
-};
-
-////////////////////////////////////////////////////// Member management.
-
-/**
- * Check if there is a member with the given identity name.
- * @param {Name} identity The member's identity name.
- * @param {boolean} useSync (optional) If true then return a rejected promise
- * since this only supports async code.
- * @return {Promise} A promise that returns true if there is a member (else
- * false), or that is rejected with GroupManagerDb.Error for a database error.
- */
-IndexedDbGroupManagerDb.prototype.hasMemberPromise = function(identity, useSync)
-{
-  if (useSync)
-    return Promise.reject(new GroupManagerDb.Error(new Error
-      ("IndexedDbGroupManagerDb.hasMemberPromise is only supported for async")));
-
-  return this.database.members.get(identity.toUri())
-  .then(function(entry) {
-    return Promise.resolve(entry != undefined);
-  })
-  .catch(function(ex) {
-    return Promise.reject(new GroupManagerDb.Error(new Error
-      ("IndexedDbGroupManagerDb.hasMemberPromise: Error: " + ex)));
-  });
-};
-
-/**
- * List all the members.
- * @param {boolean} useSync (optional) If true then return a rejected promise
- * since this only supports async code.
- * @return {Promise} A promise that returns a new array of Name with the names
- * of all members, or that is rejected with GroupManagerDb.Error for a
- * database error.
- */
-IndexedDbGroupManagerDb.prototype.listAllMembersPromise = function(useSync)
-{
-  if (useSync)
-    return Promise.reject(new GroupManagerDb.Error(new Error
-      ("IndexedDbGroupManagerDb.listAllMembersPromise is only supported for async")));
-
-  var list = [];
-  var onEntryError = null;
-  return this.database.members.each(function(entry) {
-    try {
-      var identity = new Name();
-      identity.wireDecode(new Blob(entry.memberName, false), TlvWireFormat.get());
-      list.push(identity);
-    } catch (ex) {
-      // We don't expect this to happen.
-      onEntryError = new GroupManagerDb.Error(new Error
-        ("IndexedDbGroupManagerDb.listAllMembersPromise: Error decoding name: " + ex));
-    }
-  })
-  .then(function() {
-    if (onEntryError)
-      // We got an error decoding.
-      return Promise.reject(onEntryError);
-    else
-      return Promise.resolve(list);
-  }, function(ex) {
-    return Promise.reject(new GroupManagerDb.Error(new Error
-      ("IndexedDbGroupManagerDb.listAllMembersPromise: Error: " + ex)));
-  });
-};
-
-/**
- * Get the name of the schedule for the given member's identity name.
- * @param {Name} identity The member's identity name.
- * @param {boolean} useSync (optional) If true then return a rejected promise
- * since this only supports async code.
- * @return {Promise} A promise that returns the string schedule name, or that is
- * rejected with GroupManagerDb.Error if there's no member with the given
- * identity name in the database, or other database error.
- */
-IndexedDbGroupManagerDb.prototype.getMemberSchedulePromise = function
-  (identity, useSync)
-{
-  if (useSync)
-    return Promise.reject(new GroupManagerDb.Error(new Error
-      ("IndexedDbGroupManagerDb.getMemberSchedulePromise is only supported for async")));
-
-  var thisManager = this;
-  return this.database.members.get(identity.toUri())
-  .then(function(membersEntry) {
-    if (!membersEntry)
-      throw new Error("The member identity name does not exist in the database");
-
-    return thisManager.database.schedules.get(membersEntry.scheduleId);
-  })
-  .then(function(schedulesEntry) {
-    if (!schedulesEntry)
-      throw new Error
-        ("The schedule ID for the member identity name does not exist in the database");
-
-    return Promise.resolve(schedulesEntry.scheduleName);
-  })
-  .catch(function(ex) {
-    return Promise.reject(new GroupManagerDb.Error(new Error
-      ("IndexedDbGroupManagerDb.getMemberSchedulePromise: Error: " + ex)));
-  });
-};
-
-/**
- * Add a new member with the given key named keyName into a schedule named
- * scheduleName. The member's identity name is keyName.getPrefix(-1).
- * @param {string} scheduleName The schedule name.
- * @param {Name} keyName The name of the key.
- * @param {Blob} key A Blob of the public key DER.
- * @param {boolean} useSync (optional) If true then return a rejected promise
- * since this only supports async code.
- * @return {Promise} A promise that fulfills when the member is added, or that
- * is rejected with GroupManagerDb.Error if there's no schedule named
- * scheduleName, if the member's identity name already exists, or other database
- * error.
- */
-IndexedDbGroupManagerDb.prototype.addMemberPromise = function
-  (scheduleName, keyName, key, useSync)
-{
-  if (useSync)
-    return Promise.reject(new GroupManagerDb.Error(new Error
-      ("IndexedDbGroupManagerDb.addMemberPromise is only supported for async")));
-
-  var thisManager = this;
-  return this.getScheduleIdPromise_(scheduleName)
-  .then(function(scheduleId) {
-    if (scheduleId == -1)
-      return Promise.reject(new GroupManagerDb.Error(new Error
-        ("IndexedDbGroupManagerDb.addMemberPromise: The schedule does not exist")));
-
-    // Needs to be changed in the future.
-    var memberName = keyName.getPrefix(-1);
-
-    // Add rejects if the primary key already exists.
-    return thisManager.database.members.add
-      ({ memberNameUri: memberName.toUri(),
-         memberName: memberName.wireEncode(TlvWireFormat.get()).buf(),
-         scheduleId: scheduleId,
-         keyName: keyName.wireEncode(TlvWireFormat.get()).buf(),
-         publicKey: key.buf() })
-    .catch(function(ex) {
-      return Promise.reject(new GroupManagerDb.Error(new Error
-        ("IndexedDbGroupManagerDb.addMemberPromise: Error: " + ex)));
-    });
-  });
-};
-
-/**
- * Change the name of the schedule for the given member's identity name.
- * @param {Name} identity The member's identity name.
- * @param {string} scheduleName The new schedule name.
- * @param {boolean} useSync (optional) If true then return a rejected promise
- * since this only supports async code.
- * @return {Promise} A promise that fulfills when the member is updated, or that
- * is rejected with GroupManagerDb.Error if there's no member with the given
- * identity name in the database, or there's no schedule named scheduleName, or
- * other database error.
- */
-IndexedDbGroupManagerDb.prototype.updateMemberSchedulePromise = function
-  (identity, scheduleName, useSync)
-{
-  if (useSync)
-    return Promise.reject(new GroupManagerDb.Error(new Error
-      ("IndexedDbGroupManagerDb.updateMemberSchedulePromise is only supported for async")));
-
-  var thisManager = this;
-  return this.getScheduleIdPromise_(scheduleName)
-  .then(function(scheduleId) {
-    if (scheduleId == -1)
-      return Promise.reject(new GroupManagerDb.Error(new Error
-        ("IndexedDbGroupManagerDb.updateMemberSchedulePromise: The schedule does not exist")));
-
-    return thisManager.database.members.update
-      (identity.toUri(), { scheduleId: scheduleId })
-    .catch(function(ex) {
-      return Promise.reject(new GroupManagerDb.Error(new Error
-        ("IndexedDbGroupManagerDb.updateMemberSchedulePromise: Error: " + ex)));
-    });
-  });
-};
-
-/**
- * Delete a member with the given identity name. If there is no member with
- * the identity name, then do nothing.
- * @param {Name} identity The member's identity name.
- * @param {boolean} useSync (optional) If true then return a rejected promise
- * since this only supports async code.
- * @return {Promise} A promise that fulfills when the member is deleted (or
- * there is no such member), or that is rejected with GroupManagerDb.Error for a
- * database error.
- */
-IndexedDbGroupManagerDb.prototype.deleteMemberPromise = function
-  (identity, useSync)
-{
-  if (useSync)
-    return Promise.reject(new GroupManagerDb.Error(new Error
-      ("IndexedDbGroupManagerDb.deleteMemberPromise is only supported for async")));
-
-  return this.database.members.delete(identity.toUri())
-  .catch(function(ex) {
-    return Promise.reject(new GroupManagerDb.Error(new Error
-      ("IndexedDbGroupManagerDb.deleteMemberPromise: Error: " + ex)));
-  });
-};
-
-/**
- * Check if there is an EKey with the name eKeyName in the database.
- * @param {Name} eKeyName The name of the EKey.
- * @param {boolean} useSync (optional) If true then return a rejected promise
- * since this only supports async code.
- * @return {Promise|SyncPromise} A promise that returns true if the EKey exists
- * (else false), or that is rejected with GroupManagerDb.Error for a database
- * error.
- */
-IndexedDbGroupManagerDb.prototype.hasEKeyPromise = function(eKeyName, useSync)
-{
-  if (useSync)
-    return Promise.reject(new GroupManagerDb.Error(new Error
-      ("IndexedDbGroupManagerDb.hasEKeyPromise is only supported for async")));
-
-  return this.database.ekeys.get(eKeyName.toUri())
-  .then(function(entry) {
-    return Promise.resolve(entry != undefined);
-  })
-  .catch(function(ex) {
-    return Promise.reject(new GroupManagerDb.Error(new Error
-      ("IndexedDbGroupManagerDb.hasEKeyPromise: Error: " + ex)));
-  });
-};
-
-/**
- * Add the EKey with name eKeyName to the database.
- * Add the EKey with name eKeyName to the database.
- * @param {Name} eKeyName The name of the EKey. This copies the Name.
- * @param {Blob} publicKey The encoded public Key of the group key pair.
- * @param {Blob} privateKey The encoded private Key of the group key pair.
- * @param {boolean} useSync (optional) If true then return a rejected promise
- * since this only supports async code.
- * @return {Promise|SyncPromise} A promise that fulfills when the EKey is added,
- * or that is rejected with GroupManagerDb.Error if a key with name eKeyName
- * already exists in the database, or other database error.
- */
-IndexedDbGroupManagerDb.prototype.addEKeyPromise = function
-  (eKeyName, publicKey, privateKey, useSync)
-{
-  if (useSync)
-    return Promise.reject(new GroupManagerDb.Error(new Error
-      ("IndexedDbGroupManagerDb.addEKeyPromise is only supported for async")));
-
-  var eKeyNameUri = eKeyName.toUri();
-  var thisManager = this;
-  // Add rejects if the primary key already exists.
-  return thisManager.database.ekeys.add
-    ({ eKeyNameUri: eKeyNameUri,
-       publicKey: publicKey.buf() })
-  .then(function() {
-    thisManager.privateKeyBase_[eKeyNameUri] = privateKey;
-
-    return Promise.resolve();
-  })
-  .catch(function(ex) {
-    return Promise.reject(new GroupManagerDb.Error(new Error
-      ("IndexedDbGroupManagerDb.addEKeyPromise: Error: " + ex)));
-  });
-};
-
-/**
- * Get the group key pair with the name eKeyName from the database.
- * @param {Name} eKeyName The name of the EKey.
- * @param {boolean} useSync (optional) If true then return a rejected promise
- * since this only supports async code.
- * @return {Promise|SyncPromise} A promise that returns an object (where
- * "publicKey" is the public key Blob and "privateKey" is the private key Blob),
- * or that is rejected with GroupManagerDb.Error for a database error.
- */
-IndexedDbGroupManagerDb.prototype.getEKeyPromise = function(eKeyName, useSync)
-{
-  if (useSync)
-    return Promise.reject(new GroupManagerDb.Error(new Error
-      ("IndexedDbGroupManagerDb.getEKeyPromise is only supported for async")));
-
-  var eKeyNameUri = eKeyName.toUri();
-  var thisManager = this;
-  return this.database.ekeys.get(eKeyNameUri)
-  .then(function(entry) {
-    if (entry)
-      return Promise.resolve({
-        publicKey: new Blob(entry.publicKey, true),
-        privateKey: thisManager.privateKeyBase_[eKeyNameUri]  });
-    else
-      throw new Error("The eKeyName does not exist in the database");
-  })
-  .catch(function(ex) {
-    return Promise.reject(new GroupManagerDb.Error(new Error
-      ("IndexedDbGroupManagerDb.getEKeyPromise: Error: " + ex)));
-  });
-};
-
-/**
- * Delete all the EKeys in the database. The database will keep growing because
- * EKeys will keep being added, so this method should be called periodically.
- * @param {boolean} useSync (optional) If true then return a rejected promise
- * since this only supports async code.
- * @return {Promise|SyncPromise} A promise that fulfills when the EKeys are
- * deleted, or that is rejected with GroupManagerDb.Error for a database error.
- */
-IndexedDbGroupManagerDb.prototype.cleanEKeysPromise = function(useSync)
-{
-  return Promise.reject(new Error
-    ("IndexedDbGroupManagerDb.cleanEKeysPromise is not implemented"));
-
-  var thisManager = this;
-  return this.database.ekeys.clear()
-  .then(function() {
-    thisManager.privateKeyBase_ = {};
-
-    return Promise.resolve();
-  })
-  .catch(function(ex) {
-    return Promise.reject(new GroupManagerDb.Error(new Error
-      ("IndexedDbGroupManagerDb.cleanEKeysPromise: Error: " + ex)));
-  });
-};
-
-/**
- * Delete the EKey with name eKeyName from the database. If no key with the
- * name exists in the database, do nothing.
- * @param {Name} eKeyName The name of the EKey.
- * @param {boolean} useSync (optional) If true then return a rejected promise
- * since this only supports async code.
- * @return {Promise|SyncPromise} A promise that fulfills when the EKey is
- * deleted (or there is no such key), or that is rejected with
- * GroupManagerDb.Error for a database error.
- */
-IndexedDbGroupManagerDb.prototype.deleteEKeyPromise = function(eKeyName, useSync)
-{
-  if (useSync)
-    return Promise.reject(new GroupManagerDb.Error(new Error
-      ("IndexedDbGroupManagerDb.deleteEKeyPromise is only supported for async")));
-
-  var thisManager = this;
-  return this.database.ekeys.delete(eKeyName.toUri())
-  .then(function() {
-    delete thisManager.privateKeyBase_[eKeyName.toUri()];
-
-    return Promise.resolve();
-  })
-  .catch(function(ex) {
-    return Promise.reject(new GroupManagerDb.Error(new Error
-      ("IndexedDbGroupManagerDb.deleteEKeyPromise: Error: " + ex)));
-  });
-};
-
-/**
- * Get the ID for the schedule.
- * @param {string} name The schedule name.
- * @return {Promise} A promise that returns the ID (or -1 if not found), or that
- * is rejected with GroupManagerDb.Error for a database error.
- */
-IndexedDbGroupManagerDb.prototype.getScheduleIdPromise_ = function(name)
-{
-  // The scheduleName is not the primary key, so use 'where' instead of 'get'.
-  var id = -1;
-  return this.database.schedules.where("scheduleName").equals(name)
-  .each(function(entry) {
-    id = entry.scheduleId;
-  })
-  .then(function() {
-    return Promise.resolve(id);
-  })
-  .catch(function(ex) {
-    return Promise.reject(new GroupManagerDb.Error(new Error
-      ("IndexedDbGroupManagerDb.getScheduleIdPromise_: Error: " + ex)));
-  });
-};
-/**
- * Copyright (C) 2015-2019 Regents of the University of California.
- * @author: Jeff Thompson <jefft0@remap.ucla.edu>
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU Lesser General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU Lesser General Public License for more details.
- *
- * You should have received a copy of the GNU Lesser General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
- * A copy of the GNU Lesser General Public License is in the file COPYING.
- */
-
-// Don't require modules since this is meant for the browser, not Node.js.
-
-/**
- * IndexedDbProducerDb extends ProducerDb to implement storage of keys for the
- * producer using the browser's IndexedDB service. It contains one table that
- * maps time slots (to the nearest hour) to the content key created for that
- * time slot.
- * Create an IndexedDbProducerDb to use the given IndexedDB database name.
- * @param {string} databaseName IndexedDB database name.
- * @note This class is an experimental feature. The API may change.
- * @constructor
- */
-var IndexedDbProducerDb = function IndexedDbProducerDb(databaseName)
-{
-  ProducerDb.call(this);
-
-  this.database = new Dexie(databaseName);
-  this.database.version(1).stores({
-    // "timeSlot" is the hour-based time slot as hours since Jan 1, 1970 UTC. // number
-    // "key" is the encoded key // Uint8Array
-    contentKeys: "timeSlot"
-  });
-  this.database.open();
-};
-
-IndexedDbProducerDb.prototype = new ProducerDb();
-IndexedDbProducerDb.prototype.name = "IndexedDbProducerDb";
-
-/**
- * Check if a content key exists for the hour covering timeSlot.
- * @param {number} timeSlot The time slot as milliseconds since Jan 1, 1970 UTC.
- * @param {boolean} useSync (optional) If true then return a rejected promise
- * since this only supports async code.
- * @return {Promise} A promise that returns true if there is a content key for
- * timeSlot (else false), or that is rejected with ProducerDb.Error for a
- * database error.
- */
-IndexedDbProducerDb.prototype.hasContentKeyPromise = function(timeSlot, useSync)
-{
-  if (useSync)
-    return Promise.reject(new ProducerDb.Error(new Error
-      ("IndexedDbProducerDb.hasContentKeyPromise is only supported for async")));
-
-  var fixedTimeSlot = ProducerDb.getFixedTimeSlot(timeSlot);
-
-  return this.database.contentKeys.get(fixedTimeSlot)
-  .then(function(contentKeysEntry) {
-    return Promise.resolve(contentKeysEntry != undefined);
-  })
-  .catch(function(ex) {
-    return Promise.reject(new ProducerDb.Error(new Error
-      ("IndexedDbProducerDb.hasContentKeyPromise: Error: " + ex)));
-  });
-};
-
-/**
- * Get the content key for the hour covering timeSlot.
- * @param {number} timeSlot The time slot as milliseconds since Jan 1, 1970 UTC.
- * @param {boolean} useSync (optional) If true then return a rejected promise
- * since this only supports async code.
- * @return {Promise} A promise that returns a Blob with the encoded key, or that
- * is rejected with ProducerDb.Error if there is no key covering timeSlot, or
- * other database error
- */
-IndexedDbProducerDb.prototype.getContentKeyPromise = function(timeSlot, useSync)
-{
-  if (useSync)
-    return Promise.reject(new ProducerDb.Error(new Error
-      ("IndexedDbProducerDb.getContentKeyPromise is only supported for async")));
-
-  var fixedTimeSlot = ProducerDb.getFixedTimeSlot(timeSlot);
-
-  return this.database.contentKeys.get(fixedTimeSlot)
-  .then(function(contentKeysEntry) {
-    if (contentKeysEntry)
-      return Promise.resolve(new Blob(contentKeysEntry.key));
-    else
-      return Promise.reject(new ProducerDb.Error(new Error
-        ("IndexedDbProducerDb.getContentKeyPromise: Cannot get the key from the database")));
-  }, function(ex) {
-    return Promise.reject(new ProducerDb.Error(new Error
-      ("IndexedDbProducerDb.getContentKeyPromise: Error: " + ex)));
-  });
-};
-
-/**
- * Add key as the content key for the hour covering timeSlot.
- * @param {number} timeSlot The time slot as milliseconds since Jan 1, 1970 UTC.
- * @param {Blob} key The encoded key.
- * @param {boolean} useSync (optional) If true then return a rejected promise
- * since this only supports async code.
- * @return {Promise} A promise that fulfills when the key is added, or that
- * is rejected with ProducerDb.Error if a key for the same hour already exists
- * in the database, or other database error.
- */
-IndexedDbProducerDb.prototype.addContentKeyPromise = function
-  (timeSlot, key, useSync)
-{
-  if (useSync)
-    return Promise.reject(new ProducerDb.Error(new Error
-      ("IndexedDbProducerDb.addContentKeyPromise is only supported for async")));
-
-  var fixedTimeSlot = ProducerDb.getFixedTimeSlot(timeSlot);
-
-  // Add rejects if the primary key already exists.
-  return this.database.contentKeys.add
-    ({ timeSlot: fixedTimeSlot, key: key.buf() })
-  .catch(function(ex) {
-    return Promise.reject(new ProducerDb.Error(new Error
-      ("IndexedDbProducerDb.addContentKeyPromise: Error: " + ex)));
-  });
-};
-
-/**
- * Delete the content key for the hour covering timeSlot. If there is no key for
- * the time slot, do nothing.
- * @param {number} timeSlot The time slot as milliseconds since Jan 1, 1970 UTC.
- * @param {boolean} useSync (optional) If true then return a rejected promise
- * since this only supports async code.
- * @return {Promise} A promise that fulfills when the key is deleted (or there
- * is no such key), or that is rejected with ProducerDb.Error for a database
- * error.
- */
-IndexedDbProducerDb.prototype.deleteContentKeyPromise = function(timeSlot, useSync)
-{
-  if (useSync)
-    return Promise.reject(new ProducerDb.Error(new Error
-      ("IndexedDbProducerDb.deleteContentKeyPromise is only supported for async")));
-
-  var fixedTimeSlot = ProducerDb.getFixedTimeSlot(timeSlot);
-
-  return this.database.contentKeys.delete(fixedTimeSlot)
-  .catch(function(ex) {
-    return Promise.reject(new ProducerDb.Error(new Error
-      ("IndexedDbProducerDb.deleteContentKeyPromise: Error: " + ex)));
-  });
-};
 /**
  * This class represents the digest tree for chrono-sync2013.
  * Copyright (C) 2014-2019 Regents of the University of California.
@@ -56248,9 +44613,11 @@ Face.prototype.expressInterest = function
 
   var pendingInterestId = this.getNextEntryId();
 
-  // Set the nonce in our copy of the Interest so it is saved in the PIT.
-  interest.setNonce(Face.nonceTemplate_);
-  interest.refreshNonce();
+  if (interest.getNonce().size() === 0) {
+    // Set the nonce in our copy of the Interest so it is saved in the PIT.
+    interest.setNonce(Face.nonceTemplate_);
+    interest.refreshNonce();
+  }
 
   if (this.connectionInfo == null) {
     if (this.getConnectionInfo == null)
@@ -56689,6 +45056,7 @@ Face.prototype.nfdRegisterPrefix = function
   var onIsLocalResult = function(isLocal) {
     var commandInterest = new Interest();
     commandInterest.setCanBePrefix(true);
+    commandInterest.setMustBeFresh(true);
     if (isLocal) {
       commandInterest.setName(new Name("/localhost/nfd/rib/register"));
       // The interest is answered by the local host, so set a short timeout.
@@ -57111,355 +45479,6 @@ Face.encodeLpNack_ = function(interest, networkNack)
 };
 
 Face.nonceTemplate_ = new Blob(new Buffer(4), false);
-/**
- * Copyright (C) 2017-2019 Regents of the University of California.
- * @author: Jeff Thompson <jefft0@remap.ucla.edu>
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU Lesser General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU Lesser General Public License for more details.
- *
- * You should have received a copy of the GNU Lesser General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
- * A copy of the GNU Lesser General Public License is in the file COPYING.
- */
-
-/**
- * FireflyFace extends Face to override expressInterest, registerPrefix and
- * putData to interface with Google Firestore. In general, this converts each
- * NDN name like "/ndn/user/bob" to the Firestore path "/ndn/_/user/_/bob/_"
- * where each name component has a document named "_" and a collection having
- * the name of its child component. This updates the "_" document with fields
- * like "interestExpressTime" and "data" to simulate NDN messaging. (The "_"
- * document also has a "children" field with a set of the names of the children
- * nodes, which is necessary because Firestore doesn't allow enumerating
- * children.)
- * @param {firebase.firestore.Firestore} (optional) The Firestore object which
- * is already created. If omitted, use the default "ndn-firefly" project.
- */
-var FireflyFace = function FireflyFace(db)
-{
-  // Call the base constructor.
-  // Make Face.reconnectAndExpressInterest call expressInterestHelper directly.
-  Face.call(new Transport(), { equals: function() { return true; } });
-  this.readyStatus = Face.OPENED;
-
-  if (db == undefined) {
-    var config = {
-      apiKey: "AIzaSyCDa5xAuQw78RwcpIDT0NmgmcJ9WVL60GY",
-      authDomain: "ndn-firefly.firebaseapp.com",
-      databaseURL: "https://ndn-firefly.firebaseio.com",
-      projectId: "ndn-firefly",
-      storageBucket: "",
-      messagingSenderId: "225388759140"
-    };
-    firebase.initializeApp(config);
-
-    db = firebase.firestore();
-  }
-
-  this.db_ = db;
-  // The set of Name URIs corresponding to the collections where we have added
-  // a snapshot listener to the "_" and "children" documents. The key is the URI
-  // string and the value is true.
-  this.listeningNameUris_ = {};
-  this.pendingInterestTable_ = new PendingInterestTable();
-  this.interestFilterTable_ = new InterestFilterTable();
-};
-
-FireflyFace.prototype = new Face(new Transport(), { equals: function() { return true; } });
-FireflyFace.prototype.name = "FireflyFace";
-
-/**
- * Override to do the work of expressInterest using Firestore. If a data packet
- * matching the interest is already in Firestore, call onData immediately,
- * Otherwise, add onSnapshot listeners at toFirestorePath(interest.getName())
- * and children to monitor for the addition of a "data" field.
- */
-FireflyFace.prototype.expressInterestHelper = function
-  (pendingInterestId, interest, onData, onTimeout, onNetworkNack, wireFormat)
-{
-  var thisFace = this;
-
-  // First check if the Data packet is already in Firestore.
-  // TODO: Check MustBeFresh.
-  this.getMatchingDataPromise_(interest.getName(), interest.getMustBeFresh())
-  .then(function(data) {
-    if (data != null) {
-      // Answer onData immediately.
-      onData(interest, data);
-      return SyncPromise.resolve();
-    }
-    else {
-      if (thisFace.pendingInterestTable_.add
-          (pendingInterestId, interest, onData, onTimeout, onNetworkNack) == null)
-        // removePendingInterest was already called with the pendingInterestId.
-        return SyncPromise.resolve();
-
-      // Express an interest in Firestore.
-      return thisFace.establishDocumentPromise_(interest.getName())
-      .then(function(document) {
-        // TODO: Monitor sub collections with a longer name.
-        document.onSnapshot(function(document) {
-          // TODO: Check MustBeFresh.
-          if (document.data().data) {
-            var data = new Data();
-            data.wireDecode(new Blob(document.data().data.toUint8Array(), false));
-
-            // Imitate Face.onReceivedElement.
-            var pendingInterests = [];
-            thisFace.pendingInterestTable_.extractEntriesForExpressedInterest
-              (data, pendingInterests);
-            // Process each matching PIT entry (if any).
-            for (var i = 0; i < pendingInterests.length; ++i) {
-              var pendingInterest = pendingInterests[i];
-              try {
-                pendingInterest.getOnData()(pendingInterest.getInterest(), data);
-              } catch (ex) {
-                console.log("Error in onData: " + NdnCommon.getErrorWithStackTrace(ex));
-              }
-            }
-          }
-        });
-
-        // TODO: Check if an existing interestLifetime has a later expiration.
-        return document.set({
-          interestExpressTime: firebase.firestore.FieldValue.serverTimestamp(),
-          interestLifetime: interest.getInterestLifetimeMilliseconds()
-        }, { merge: true });
-      });
-    }
-  }).catch(function(error) {
-    console.log("Error in expressInterest:", error);
-  });
-};
-
-/**
- * Override to do the work of registerPrefix using Firestore. Add onSnapshot
- * listeners at toFirestorePath(prefix.getName()) and children to monitor for
- * the addition of an "interestExpressTime" field. See addListeners_ for details.
- */
-FireflyFace.prototype.nfdRegisterPrefix = function
-  (registeredPrefixId, prefix, onInterest, flags, onRegisterFailed,
-   onRegisterSuccess, commandKeyChain, commandCertificateName, wireFormat)
-{
-  var thisFace = this;
-
-  this.establishDocumentPromise_(prefix)
-  .then(function(document) {
-    // Monitor this and all sub documents.
-
-    // Imitate Face.RegisterResponse.onData .
-    var interestFilterId = 0;
-    if (onInterest != null)
-      // registerPrefix was called with the "combined" form that includes the
-      // callback, so add an InterestFilterEntry.
-      interestFilterId = thisFace.setInterestFilter
-        (new InterestFilter(prefix), onInterest);
-
-    if (!thisFace.registeredPrefixTable_.add
-        (registeredPrefixId, prefix, interestFilterId)) {
-      // removeRegisteredPrefix was already called with the registeredPrefixId.
-      if (interestFilterId > 0)
-        // Remove the related interest filter we just added.
-        this.parent.unsetInterestFilter(interestFilterId);
-    }
-    else {
-      // TODO: Check onRegisterSuccess.
-      thisFace.addListeners_(prefix.toUri(), document.parent);
-    }
-  });
-};
-
-/**
- * The OnInterest callback calls this to put a Data packet which satisfies an
- * Interest. Override to put the Data packet into Firestore.
- * @param {Data} data The Data packet which satisfies the interest.
- * @param {WireFormat} wireFormat (optional) A WireFormat object used to encode
- * the Data packet. If omitted, use WireFormat.getDefaultWireFormat().
- * @throws Error If the encoded Data packet size exceeds getMaxNdnPacketSize().
- */
-FireflyFace.prototype.putData = function(data, wireFormat)
-{
-  wireFormat = (wireFormat || WireFormat.getDefaultWireFormat());
-
-  var encoding = data.wireEncode(wireFormat);
-  if (encoding.size() > Face.getMaxNdnPacketSize())
-    throw new Error
-      ("The encoded Data packet size exceeds the maximum limit getMaxNdnPacketSize()");
-
-  // TODO: Check if we can remove Interest fields in Firestore.
-  this.setDataPromise_(data)
-  .catch(function(error) {
-    console.log("Error in putData:", error);
-  });
-};
-
-/**
- * Look in Firestore for an existing Data packet which matches the name.
- * @param {Name} name The Name.
- * @param {boolean} mustBeFresh If true, make sure the Data is not expired
- * according to the Firestore document "storeTime" and "freshnessPeriod".
- * @returns {Promise} A promise that returns the matching Data, or returns null
- * if not found.
- */
-FireflyFace.prototype.getMatchingDataPromise_ = function(name, mustBeFresh)
-{
-  // TODO: Check mustBeFresh.
-  // TODO: Do longest prefix match.
-  return this.db_.doc(FireflyFace.toFirestorePath(name)).get()
-  .then(function(document) {
-    if (document.exists && document.data().data) {
-      var data = new Data();
-      // TODO: Check for decoding error.
-      data.wireDecode(new Blob(document.data().data.toUint8Array(), false));
-      return SyncPromise.resolve(data);
-    }
-    else
-      return SyncPromise.resolve(null);
-  });
-};
-
-/**
- * Get the Firestore path for the Name, for example "/ndn/_/user/_/bob/_" for
- * the NDN name "/ndn/user/bob".
- * @param {Name} name The Name.
- * @returns {string} The Firestore path.
- */
-FireflyFace.toFirestorePath = function(name)
-{
-  var result = "";
-
-  for (var i = 0; i < name.size(); ++i)
-    result += "/"+ name.components[i].toEscapedString() + "/_";
-
-  return result;
-};
-
-/**
- * Recursively add an onSnapshot listener at collection.doc("_") and all
- * children. When collection.doc("_") is updated with an "interestExpressTime"
- * field, onSnapshot processes as if we have received an interest and calls
- * OnInterest callbacks. Add nameUri to listeningNameUris_. However, if nameUri
- * is already in listeningNameUris_, do nothing.
- * @param {string} nameUri The URI of the name represented by collection.
- * @param {firebase.firestore.DocumentReference} collection The collection with
- * name nameUri.
- */
-FireflyFace.prototype.addListeners_ = function(nameUri, collection)
-{
-  if (this.listeningNameUris_[nameUri])
-    // We are already listening.
-    return;
-
-  this.listeningNameUris_[nameUri] = true;
-  var thisFace = this;
-
-  collection.doc("_").onSnapshot(function(document) {
-    if (!document.exists)
-      return;
-
-    // TODO: Listen for added Data.
-
-    // TODO: A better check if there is already a matching Data.
-    if (document.data().interestExpressTime && !document.data().data) {
-      var interestLifetime = document.data().interestLifetime;
-      // TODO: Check interestLifetime for an expired interest.
-      var interest = new Interest(new Name(nameUri));
-      interest.setInterestLifetimeMilliseconds(interestLifetime);
-
-      // Imitate Face.onReceivedElement.
-      // Call all interest filter callbacks which match.
-      var matchedFilters = [];
-      thisFace.interestFilterTable_.getMatchedFilters(interest, matchedFilters);
-      for (var i = 0; i < matchedFilters.length; ++i) {
-        var entry = matchedFilters[i];
-        try {
-          entry.getOnInterest()
-            (entry.getFilter().getPrefix(), interest, thisFace,
-             entry.getInterestFilterId(), entry.getFilter());
-        } catch (ex) {
-          console.log("Error in onInterest: " + NdnCommon.getErrorWithStackTrace(ex));
-        }
-      }
-    }
-  });
-
-  collection.doc("children").onSnapshot(function(document) {
-    if (!document.exists)
-      return;
-
-    for (var componentUri in document.data())
-      // This will call onSnapshot and recursively add children.
-      thisFace.addListeners_
-        (nameUri + "/" + componentUri,
-         collection.doc("_").collection(componentUri));
-  });
-};
-
-/**
- * Set the "data", "storeTime" and "freshnessPeriod" fields in the Firestore
- * document based on data.getName(). If the freshnessPeriod is not specified,
- * this sets it to null. This replaces existing fields.
- * @param {Data} data The Data packet.
- * @param {WireFormat} wireFormat A WireFormat object used to encode the Data
- * packet.
- * @return {Promise} A promise that fulfills when the operation is complete.
- */
-FireflyFace.prototype.setDataPromise_ = function(data, wireFormat)
-{
-  return this.establishDocumentPromise_(data.getName())
-  .then(function(document) {
-    return document.set({
-      data: firebase.firestore.Blob.fromBase64String
-        (data.wireEncode(wireFormat).buf().toString('base64')),
-      storeTime: firebase.firestore.FieldValue.serverTimestamp(),
-      freshnessPeriod: data.getMetaInfo().getFreshnessPeriod()
-    }, { merge: true });
-  });
-};
-
-/**
- * Get the Firestore document for the given name, creating the "children"
- * documents at each level in the collection tree as needed. For example, if
- * Firestore has the document /ndn/_/user/_/joe/_ and you ask for the document
- * for the name /ndn/role/doctor this returns the document
- * /ndn/_/role/_/doctor/_ and adds { role: null } to /ndn/children and adds
- * { doctor: null } to /ndn/_/role/children . (We represent the set of children
- * by an object with the set elements are the key and the value is null.)
- * @param {Name} name The Name for the document.
- * @returns {Promise} A promise that returns the
- * firebase.firestore.DocumentReference .
- */
-FireflyFace.prototype.establishDocumentPromise_ = function(name)
-{
-  // Update the "children" document of the collection, and recursively call this
-  // with each component until the collection for the final component and return
-  // its "_" document.
-  var establish = function(collection, iComponent) {
-    if (iComponent >= name.size() - 1)
-      // We're finished.
-      return SyncPromise.resolve(collection.doc("_"));
-    else {
-      var childString = name.get(iComponent + 1).toEscapedString();
-      // Update the "children" document.
-      var content = {};
-      content[childString] = null;
-      return collection.doc("children").set(content, { merge: true })
-      .then(function () {
-        return establish(collection.doc("_").collection(childString), iComponent + 1);
-      });
-    }
-  };
-
-  return establish(this.db_.collection(name.get(0).toEscapedString()), 0);
-};
 var _savedGlobals = {};
 Object.keys(ndn).forEach(function(k){
   _savedGlobals[k] = globals[k];
@@ -57467,10 +45486,10 @@ Object.keys(ndn).forEach(function(k){
 });
 
 /**
- * Stop exposing ndn-js class names in the global namespace.
+ * Stop exposing NDN-DIRECT-IND class names in the global namespace.
  *
- * By default, ndn-js exposes all class names into the global namespace for convenience.
- * This function removes ndn-js class names from the global namespace to avoid conflicts.
+ * By default, NDN-DIRECT-IND exposes all class names into the global namespace for convenience.
+ * This function removes NDN-DIRECT-IND class names from the global namespace to avoid conflicts.
  * After that, the application must explicitly reference `ndn.` before a class name.
  */
 ndn.noConflict = function() {

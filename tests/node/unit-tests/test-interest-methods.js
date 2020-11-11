@@ -1,4 +1,16 @@
 /**
+ * Copyright (C) 2020 Operant Networks, Incorporated.
+ * @author: Jeff Thompson <jefft0@gmail.com>
+ *
+ * This works is based substantially on previous work as listed below:
+ *
+ * Original file: tests/node/unit-tests/test-interest-methods.js
+ * Original repository: https://github.com/named-data/ndn-js
+ *
+ * Summary of Changes: Remove security v1.
+ *
+ * which was originally released under the LGPL license with the following rights:
+ *
  * Copyright (C) 2014-2019 Regents of the University of California.
  * @author: Jeff Thompson <jefft0@remap.ucla.edu>
  * From PyNDN unit-tests by Adeola Bannis.
@@ -29,10 +41,6 @@ var Sha256WithRsaSignature = require('../../..').Sha256WithRsaSignature;
 var DigestSha256Signature = require('../../..').DigestSha256Signature;
 var KeyLocatorType = require('../../..').KeyLocatorType;
 var Blob = require('../../..').Blob;
-var MemoryIdentityStorage = require('../../..').MemoryIdentityStorage;
-var MemoryPrivateKeyStorage = require('../../..').MemoryPrivateKeyStorage;
-var IdentityManager = require('../../..').IdentityManager;
-var SelfVerifyPolicyManager = require('../../..').SelfVerifyPolicyManager;
 var KeyChain = require('../../..').KeyChain;
 var InterestFilter = require('../../..').InterestFilter;
 
@@ -357,27 +365,17 @@ describe('TestInterestMethods', function() {
       component.toEscapedString() + " should not match " + exclude.toUri());
   });
 
-  it('VerifyDigestSha256', function() {
-    // Create a KeyChain but we don't need to add keys.
-    var identityStorage = new MemoryIdentityStorage();
-    var privateKeyStorage = new MemoryPrivateKeyStorage();
-    var keyChain = new KeyChain
-      (new IdentityManager(identityStorage, privateKeyStorage),
-       new SelfVerifyPolicyManager(identityStorage));
-
+  it('VerifyHmacWithSha256', function() {
     var interest = new Interest(new Name("/test/signed-interest"));
-    keyChain.signWithSha256(interest);
+    var keyBytes = Buffer.from([
+       0,  1,  2,  3,  4,  5,  6,  7,  8,  9, 10, 11, 12, 13, 14, 15,
+      16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31
+    ]);
+    var key = new Blob(keyBytes);
+    var keyName = new Name("key1");
 
-    // We create simple callbacks to count calls since we're not interested in
-    //   the effect of the callbacks themselves.
-    var failedCallCount = 0;
-    var verifiedCallCount = 0;
-
-    keyChain.verifyInterest
-      (interest, function() { ++verifiedCallCount; },
-       function() { ++failedCallCount; });
-    assert.equal(failedCallCount, 0, 'Signature verification failed');
-    assert.equal(verifiedCallCount, 1, 'Verification callback was not used.');
+    KeyChain.signWithHmacWithSha256(interest, key, keyName);
+    assert.ok(KeyChain.verifyInterestWithHmacWithSha256(interest, key), 'Signature verification failed');
   });
 
   it('MatchesData', function() {

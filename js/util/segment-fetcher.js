@@ -119,6 +119,12 @@ SegmentFetcher.DontVerifySegment = function(data)
 SegmentFetcher.fetch = function
   (face, baseInterest, validatorKeyChain, onComplete, onError, opts, stats)
 {
+  if (validatorKeyChain != null) {
+    onError(SegmentFetcher.ErrorCode.INVALID_KEYCHAIN,
+            "Debug: validatorKeyChain is temporarily not supported. Use null.");
+    return;
+  }
+
   if (opts == null || opts.pipeline === undefined || opts.pipeline === "cubic") {
     if (validatorKeyChain == null || validatorKeyChain instanceof KeyChain)
       new PipelineCubic

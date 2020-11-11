@@ -1,4 +1,16 @@
 /**
+ * Copyright (C) 2020 Operant Networks, Incorporated.
+ * @author: Jeff Thompson <jefft0@gmail.com>
+ *
+ * This works is based substantially on previous work as listed below:
+ *
+ * Original file: tests/node/integration-tests/test-registration-callbacks.js
+ * Original repository: https://github.com/named-data/ndn-js
+ *
+ * Summary of Changes: Remove security v1.
+ *
+ * which was originally released under the LGPL license with the following rights:
+ *
  * Copyright (C) 2015-2019 Regents of the University of California.
  * @author: Jeff Thompson <jefft0@remap.ucla.edu>
  * From jNDN TestRegistrationCallbacks by Andrew Brown <andrew.brown@intel.com>
@@ -24,12 +36,8 @@ var Name = require('../../..').Name;
 var Face = require('../../..').Face;
 var Blob = require('../../..').Blob;
 var UnixTransport = require('../../..').UnixTransport;
-var KeyType = require('../../..').KeyType;
-var MemoryIdentityStorage = require('../../..').MemoryIdentityStorage;
-var MemoryPrivateKeyStorage = require('../../..').MemoryPrivateKeyStorage;
-var IdentityManager = require('../../..').IdentityManager;
-var SelfVerifyPolicyManager = require('../../..').SelfVerifyPolicyManager;
 var KeyChain = require('../../..').KeyChain;
+var SafeBag = require('../../..').SafeBag;
 
 var DEFAULT_RSA_PUBLIC_KEY_DER = new Buffer([
     0x30, 0x82, 0x01, 0x22, 0x30, 0x0d, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01,
@@ -144,22 +152,13 @@ describe('TestRegistrationCallbacks', function() {
     //   a default private key instead of the system default key chain. This
     //   is OK for now because NFD is configured to skip verification, so it
     //   ignores the system default key chain.
-    var identityStorage = new MemoryIdentityStorage();
-    var privateKeyStorage = new MemoryPrivateKeyStorage();
-    var keyChain = new KeyChain
-      (new IdentityManager(identityStorage, privateKeyStorage),
-       new SelfVerifyPolicyManager(identityStorage));
+    var keyChain = new KeyChain("pib-memory:", "tpm-memory:");
+    keyChain.importSafeBag(new SafeBag
+      (new Name("/testname/KEY/123"),
+       new Blob(DEFAULT_RSA_PRIVATE_KEY_DER, false),
+       new Blob(DEFAULT_RSA_PUBLIC_KEY_DER, false)));
 
-    // Initialize the storage.
-    var keyName = new Name("/testname/DSK-123");
-    var certificateName = keyName.getSubName(0, keyName.size() - 1).append
-      ("KEY").append(keyName.get(-1)).append("ID-CERT").append("0");
-    identityStorage.addKey
-      (keyName, KeyType.RSA, new Blob(DEFAULT_RSA_PUBLIC_KEY_DER, false));
-    privateKeyStorage.setKeyPairForKeyName
-      (keyName, KeyType.RSA, DEFAULT_RSA_PUBLIC_KEY_DER, DEFAULT_RSA_PRIVATE_KEY_DER);
-
-    face.setCommandSigningInfo(keyChain, certificateName);
+    face.setCommandSigningInfo(keyChain, keyChain.getDefaultCertificateName());
 
     counter = { onRegisterFailedCallCount: 0, onRegisterSuccessCallCount: 0 };
 

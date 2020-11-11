@@ -27,11 +27,8 @@ var Interest = require('../../..').Interest;
 var Face = require('../../..').Face;
 var KeyType = require('../../..').KeyType;
 var NetworkNack = require('../../..').NetworkNack;
-var MemoryIdentityStorage = require('../../..').MemoryIdentityStorage;
-var MemoryPrivateKeyStorage = require('../../..').MemoryPrivateKeyStorage;
-var IdentityManager = require('../../..').IdentityManager;
-var NoVerifyPolicyManager = require('../../..').NoVerifyPolicyManager;
 var KeyChain = require('../../..').KeyChain;
+var SafeBag = require('../../..').SafeBag;
 
 var DEFAULT_RSA_PUBLIC_KEY_DER = new Buffer([
     0x30, 0x82, 0x01, 0x22, 0x30, 0x0d, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01,
@@ -191,28 +188,19 @@ var interestID;
 var faceIn;
 var faceOut;
 var keyChain;
-var certificateName;
 
 describe('TestFaceRegisterMethods', function() {
   beforeEach(function(done) {
-    var identityStorage = new MemoryIdentityStorage();
-    var privateKeyStorage = new MemoryPrivateKeyStorage();
-    keyChain = new KeyChain
-      (new IdentityManager(identityStorage, privateKeyStorage),
-       new NoVerifyPolicyManager());
-    var keyName = new Name("/testname/DSK-123");
-    certificateName = keyName.getSubName(0, keyName.size() - 1).append
-      ("KEY").append(keyName.get(-1)).append("ID-CERT").append("0");
-
-    identityStorage.addKey
-      (keyName, KeyType.RSA, new Blob(DEFAULT_RSA_PUBLIC_KEY_DER, false));
-    privateKeyStorage.setKeyPairForKeyName
-      (keyName, KeyType.RSA, DEFAULT_RSA_PUBLIC_KEY_DER, DEFAULT_RSA_PRIVATE_KEY_DER);
+    keyChain = new KeyChain("pib-memory:", "tpm-memory:");
+    keyChain.importSafeBag(new SafeBag
+      (new Name("/testname/KEY/123"),
+       new Blob(DEFAULT_RSA_PRIVATE_KEY_DER, false),
+       new Blob(DEFAULT_RSA_PUBLIC_KEY_DER, false)));
 
     faceIn = new Face({host: "localhost"});
     faceOut = new Face({host: "localhost"});
-    faceIn.setCommandSigningInfo(keyChain, certificateName);
-    faceOut.setCommandSigningInfo(keyChain, certificateName);
+    faceIn.setCommandSigningInfo(keyChain, keyChain.getDefaultCertificateName());
+    faceOut.setCommandSigningInfo(keyChain, keyChain.getDefaultCertificateName());
     done();
   });
 
@@ -231,7 +219,7 @@ describe('TestFaceRegisterMethods', function() {
         ++interestCallbackCount;
         var data = new Data(interest.getName());
         data.setContent(new Blob("SUCCESS"));
-        keyChain.sign(data, certificateName);
+        keyChain.sign(data);
         face.putData(data);
       } catch (ex) { done(ex); }
     }, function(prefix) {
