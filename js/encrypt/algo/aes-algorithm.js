@@ -74,7 +74,20 @@ AesAlgorithm.decryptPromise = function(keyBits, encryptedData, params, useSync)
       return Promise.reject(new Error("unsupported encryption mode"));
   }
   else {
-    if (params.getAlgorithmType() == EncryptAlgorithmType.AesCbc) {
+    if (params.getAlgorithmType() == EncryptAlgorithmType.AesEcb) {
+      try {
+        // ECB ignores the initial vector.
+        var cipher = Crypto.createDecipheriv
+          (keyBits.size()  == 32 ? "aes-256-ecb" : "aes-128-ecb",
+           keyBits.buf(), "");
+        return SyncPromise.resolve(new Blob
+          (Buffer.concat([cipher.update(encryptedData.buf()), cipher.final()]),
+           false));
+      } catch (err) {
+        return SyncPromise.reject(err);
+      }
+    }
+    else if (params.getAlgorithmType() == EncryptAlgorithmType.AesCbc) {
       try {
         var cipher = Crypto.createDecipheriv
           (keyBits.size()  == 32 ? "aes-256-cbc" : "aes-128-cbc",
@@ -147,7 +160,15 @@ AesAlgorithm.encryptPromise = function(keyBits, plainData, params, useSync)
       return Promise.reject(new Error("unsupported encryption mode"));
   }
   else {
-    if (params.getAlgorithmType() == EncryptAlgorithmType.AesCbc) {
+    if (params.getAlgorithmType() == EncryptAlgorithmType.AesEcb) {
+      // ECB ignores the initial vector.
+      var cipher = Crypto.createCipheriv
+        (keyBits.size()  == 32 ? "aes-256-ecb" : "aes-128-ecb", keyBits.buf(), "");
+      return SyncPromise.resolve(new Blob
+        (Buffer.concat([cipher.update(plainData.buf()), cipher.final()]),
+         false));
+    }
+    else if (params.getAlgorithmType() == EncryptAlgorithmType.AesCbc) {
       var cipher = Crypto.createCipheriv
         (keyBits.size()  == 32 ? "aes-256-cbc" : "aes-128-cbc",
          keyBits.buf(), params.getInitialVector().buf());
