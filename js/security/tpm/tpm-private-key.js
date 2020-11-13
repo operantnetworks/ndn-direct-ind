@@ -54,6 +54,8 @@ var TpmPrivateKey = function TpmPrivateKey()
   this.privateKey_ = null; // The PEM-encoded private key.
   this.subtleKey_ = null;  // The internal Crypto.subtle form of the key.
   this.decryptSubtleKey_ = null; // The internal Crypto.subtle form of the key for decryption.
+  this.encryptionAlgorithm_ = "des"; // Base algorithm.
+  this.encryptionAlgorithm_ += "-ede3-cbc";
 };
 
 exports.TpmPrivateKey = TpmPrivateKey;
@@ -320,7 +322,7 @@ TpmPrivateKey.prototype.loadEncryptedPkcs8 = function(encoding, password)
       try {
         // TODO: Support Crypto.subtle.
         var cipher = Crypto.createDecipheriv
-          ("des-ede3-cbc", derivedKey, initialVector.buf());
+          (this.encryptionAlgorithm_, derivedKey, initialVector.buf());
         pkcs8Encoding = Buffer.concat
           ([cipher.update(encryptedKey.buf()), cipher.final()]);
       }
@@ -606,7 +608,7 @@ TpmPrivateKey.prototype.toEncryptedPkcs8 = function(password)
   try {
     // TODO: Support Crypto.subtle.
     var cipher = Crypto.createCipheriv
-      ("des-ede3-cbc", derivedKey, initialVector);
+      (this.encryptionAlgorithm_, derivedKey, initialVector);
     encryptedEncoding = Buffer.concat
       ([cipher.update(this.toPkcs8().buf()), cipher.final()]);
   }

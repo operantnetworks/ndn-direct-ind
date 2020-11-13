@@ -11,3 +11,4 @@ Changes
 * In NAC, add support for a group content key (GCK) and secured interest.
 * In KeyChain, remove obsolete security v1 API.
 * Remove support for obsolete AES-128-ECB and AES-256-ECB.
+* In TpmPrivateKey: Make the encryption algorithm a member variable.
