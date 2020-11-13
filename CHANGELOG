@@ -1,4 +1,4 @@
-NDN-DIRECT-IND (2020-11-08)
+NDN-DIRECT-IND (2020-11-13)
 ---------------------------
 
 Changes
@@ -10,3 +10,5 @@ Changes
 * Remove obsolete Name-based Access Control v1. (Keep v2.)
 * In NAC, add support for a group content key (GCK) and secured interest.
 * In KeyChain, remove obsolete security v1 API.
+* Remove support for obsolete AES-128-ECB and AES-256-ECB.
+* In TpmPrivateKey: Make the encryption algorithm a member variable.
