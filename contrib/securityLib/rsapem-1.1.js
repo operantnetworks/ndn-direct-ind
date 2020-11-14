@@ -39,8 +39,8 @@ var RSAKey = require('./rsa2.js').RSAKey;
 
 function _rsapem_pemToBase64(sPEMPrivateKey) {
   var s = sPEMPrivateKey;
-  s = s.replace("-----BEGIN RSA PRIVATE KEY-----", "");
-  s = s.replace("-----END RSA PRIVATE KEY-----", "");
+  s = s.replace("-----BEGIN RSA" + " PRIVATE KEY-----", "");
+  s = s.replace("-----END RSA" + " PRIVATE KEY-----", "");
   s = s.replace(/[ \n]+/g, "");
   return s;
 }
