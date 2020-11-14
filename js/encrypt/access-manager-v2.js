@@ -237,21 +237,21 @@ AccessManagerV2.prototype.addMemberForKdkPromise_ = function
     .append(EncryptorV2.NAME_COMPONENT_ENCRYPTED_BY)
     .append(memberCertificate.getKeyName());
 
-  var secretLength = 32;
-  var secret = Crypto.randomBytes(secretLength);
+  var valueLength = 32;
+  var value = Crypto.randomBytes(valueLength);
   // To be compatible with OpenSSL which uses a null-terminated string,
   // replace each 0 with 1. And to be compatible with the Java security
   // library which interprets the secret as a char array converted to UTF8,
   // limit each byte to the ASCII range 1 to 127.
-  for (var i = 0; i < secretLength; ++i) {
-    if (secret[i] == 0)
-      secret[i] = 1;
+  for (var i = 0; i < valueLength; ++i) {
+    if (value[i] == 0)
+      value[i] = 1;
 
-    secret[i] &= 0x7f;
+    value[i] &= 0x7f;
   }
 
   var kdkSafeBag = this.keyChain_.exportSafeBag
-    (this.nacKey_.getDefaultCertificate(), secret);
+    (this.nacKey_.getDefaultCertificate(), value);
 
   var memberKey = new PublicKey(memberCertificate.getPublicKey());
 
@@ -259,7 +259,7 @@ AccessManagerV2.prototype.addMemberForKdkPromise_ = function
   encryptedContent.setPayload(kdkSafeBag.wireEncode());
   // Debug: Use a Promise.
   encryptedContent.setPayloadKey(memberKey.encrypt
-    (secret, EncryptAlgorithmType.RsaOaep));
+    (value, EncryptAlgorithmType.RsaOaep));
 
   var kdkData = new Data(kdkName);
   kdkData.setContent(encryptedContent.wireEncodeV2());
