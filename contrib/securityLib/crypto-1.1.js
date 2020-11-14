@@ -515,7 +515,7 @@ KJUR.crypto.MessageDigest = function(params) {
  */
 KJUR.crypto.Mac = function(params) {
     var mac = null;
-    var pass = null;
+    var word = null;
     var algName = null;
     var provName = null;
     var algProv = null;
@@ -540,7 +540,7 @@ KJUR.crypto.Mac = function(params) {
 	    prov == 'cryptojs') {
 	    try {
 		var mdObj = eval(KJUR.crypto.Util.CRYPTOJSMESSAGEDIGESTNAME[hashAlg]);
-		this.mac = CryptoJS.algo.HMAC.create(mdObj, this.pass);
+		this.mac = CryptoJS.algo.HMAC.create(mdObj, this.word);
 	    } catch (ex) {
 		throw "setAlgAndProvider hash alg set fail hashAlg=" + hashAlg + "/" + ex;
 	    }
@@ -641,11 +641,11 @@ KJUR.crypto.Mac = function(params) {
      * @name setPassword
      * @memberOf KJUR.crypto.Mac
      * @function
-     * @param {Object} pass password for Mac
+     * @param {Object} word password for Mac
      * @since crypto 1.1.7 jsrsasign 4.9.0
      * @description
      * This method will set password for (H)Mac internally.
-     * Argument 'pass' can be specified as following:
+     * Argument 'word' can be specified as following:
      * <ul>
      * <li>even length string of 0..9, a..f or A-F: implicitly specified as hexadecimal string</li>
      * <li>not above string: implicitly specified as raw string</li>
@@ -677,46 +677,46 @@ KJUR.crypto.Mac = function(params) {
      * // set password by explicit Base64URL string
      * mac.setPassword({"b64u": "Mb-c3f_"});
      */
-    this.setPassword = function(pass) {
-	// internal this.pass shall be CryptoJS DWord Object for CryptoJS bug
+    this.setPassword = function(word) {
+	// internal this.word shall be CryptoJS DWord Object for CryptoJS bug
 	// work around. CrytoJS HMac password can be passed by
 	// raw string as described in the manual however it doesn't
 	// work properly in some case. If password was passed
 	// by CryptoJS DWord which is not described in the manual
 	// it seems to work. (fixed since crypto 1.1.7)
 
-	if (typeof pass == 'string') {
-	    var hPass = pass;
-	    if (pass.length % 2 == 1 || ! pass.match(/^[0-9A-Fa-f]+$/)) { // raw str
-		hPass = rstrtohex(pass);
+	if (typeof word == 'string') {
+	    var hWord = word;
+	    if (word.length % 2 == 1 || ! word.match(/^[0-9A-Fa-f]+$/)) { // raw str
+		hWord = rstrtohex(word);
 	    }
-	    this.pass = CryptoJS.enc.Hex.parse(hPass);
+	    this.word = CryptoJS.enc.Hex.parse(hWord);
 	    return;
 	}
 
-	if (typeof pass != 'object')
-	    throw "KJUR.crypto.Mac unsupported password type: " + pass;
+	if (typeof word != 'object')
+	    throw "KJUR.crypto.Mac unsupported password type: " + word;
 	
-	var hPass = null;
-	if (pass.hex  !== undefined) {
-	    if (pass.hex.length % 2 != 0 || ! pass.hex.match(/^[0-9A-Fa-f]+$/))
-		throw "Mac: wrong hex password: " + pass.hex;
-	    hPass = pass.hex;
+	var hWord = null;
+	if (word.hex  !== undefined) {
+	    if (word.hex.length % 2 != 0 || ! word.hex.match(/^[0-9A-Fa-f]+$/))
+		throw "Mac: wrong hex password: " + word.hex;
+	    hWord = word.hex;
 	}
-	if (pass.utf8 !== undefined) hPass = utf8tohex(pass.utf8);
-	if (pass.rstr !== undefined) hPass = rstrtohex(pass.rstr);
-	if (pass.b64  !== undefined) hPass = b64tohex(pass.b64);
-	if (pass.b64u !== undefined) hPass = b64utohex(pass.b64u);
+	if (word.utf8 !== undefined) hWord = utf8tohex(word.utf8);
+	if (word.rstr !== undefined) hWord = rstrtohex(word.rstr);
+	if (word.b64  !== undefined) hWord = b64tohex(word.b64);
+	if (word.b64u !== undefined) hWord = b64utohex(word.b64u);
 
-	if (hPass == null)
-	    throw "KJUR.crypto.Mac unsupported password type: " + pass;
+	if (hWord == null)
+	    throw "KJUR.crypto.Mac unsupported password type: " + word;
 
-	this.pass = CryptoJS.enc.Hex.parse(hPass);
+	this.word = CryptoJS.enc.Hex.parse(hWord);
     };
 
     if (params !== undefined) {
-	if (params.pass !== undefined) {
-	    this.setPassword(params.pass);
+	if (params.word !== undefined) {
+	    this.setPassword(params.word);
 	}
 	if (params.alg !== undefined) {
 	    this.algName = params.alg;
@@ -861,13 +861,13 @@ KJUR.crypto.Signature = function(params) {
                       this.mdAlgName + "/" + ex;
 	    }
 
-	    this.init = function(keyparam, pass) {
+	    this.init = function(keyparam, word) {
 		var keyObj = null;
 		try {
-		    if (pass === undefined) {
+		    if (word === undefined) {
 			keyObj = KEYUTIL.getKey(keyparam);
 		    } else {
-			keyObj = KEYUTIL.getKey(keyparam, pass);
+			keyObj = KEYUTIL.getKey(keyparam, word);
 		    }
 		} catch (ex) {
 		    throw "init failed:" + ex;
@@ -986,7 +986,7 @@ KJUR.crypto.Signature = function(params) {
      * @memberOf KJUR.crypto.Signature
      * @function
      * @param {Object} key specifying public or private key as plain/encrypted PKCS#5/8 PEM file, certificate PEM or {@link RSAKey}, {@link KJUR.crypto.DSA} or {@link KJUR.crypto.ECDSA} object
-     * @param {String} pass (OPTION) passcode for encrypted private key
+     * @param {String} word (OPTION) passcode for encrypted private key
      * @since crypto 1.1.3
      * @description
      * This method is very useful initialize method for Signature class since
@@ -1015,8 +1015,8 @@ KJUR.crypto.Signature = function(params) {
      * @example
      * sig.init(sCertPEM)
      */
-    this.init = function(key, pass) {
-	throw "init(key, pass) not supported for this alg:prov=" +
+    this.init = function(key, word) {
+	throw "init(key, word) not supported for this alg:prov=" +
 	      this.algProvName;
     };
 
