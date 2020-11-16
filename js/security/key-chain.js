@@ -1098,7 +1098,7 @@ KeyChain.prototype.selfSign = function(key, wireFormat, onComplete, onError)
  * Export a certificate and its corresponding private key in a SafeBag.
  * @param {CertificateV2} certificate The certificate to export. This gets the
  * key from the TPM using certificate.getKeyName().
- * @param {Buffer} password (optional) The password for encrypting the private
+ * @param {Buffer} word (optional) The password for encrypting the private
  * key, which should have characters in the range of 1 to 127. If the password
  * is supplied, use it to put a PKCS #8 EncryptedPrivateKeyInfo in the SafeBag.
  * If the password is null, put an unencrypted PKCS #8 PrivateKeyInfo in the
@@ -1113,12 +1113,12 @@ KeyChain.prototype.selfSign = function(key, wireFormat, onComplete, onError)
  * errors exporting the private key.
  */
 KeyChain.prototype.exportSafeBagPromise = function
-  (certificate, password, useSync)
+  (certificate, word, useSync)
 {
-  if (typeof password === 'boolean') {
+  if (typeof word === 'boolean') {
     // password is omitted, so shift.
-    useSync = password;
-    password = undefined;
+    useSync = word;
+    word = undefined;
   }
 
   var keyName = certificate.getKeyName();
@@ -1126,7 +1126,7 @@ KeyChain.prototype.exportSafeBagPromise = function
   var thisKeyChain = this;
   return SyncPromise.resolve()
   .then(function() {
-    return thisKeyChain.tpm_.exportPrivateKeyPromise_(keyName, password, useSync);
+    return thisKeyChain.tpm_.exportPrivateKeyPromise_(keyName, word, useSync);
   }, function(err) {
     return SyncPromise.reject(new KeyChain.Error(new Error
       ("Failed to export private key `" + keyName.toUri() + "`: " + err)));
@@ -1179,7 +1179,7 @@ KeyChain.prototype.exportSafeBag = function
  * KeyChain.
  * @param {SafeBag} safeBag The SafeBag containing the certificate and private
  * key. This copies the values from the SafeBag.
- * @param {Buffer} password (optional) The password for decrypting the private
+ * @param {Buffer} word (optional) The password for decrypting the private
  * key, which should have characters in the range of 1 to 127. If the password
  * is supplied, use it to decrypt the PKCS #8 EncryptedPrivateKeyInfo. If the
  * password is omitted or null, import an unencrypted PKCS #8 PrivateKeyInfo.
@@ -1188,12 +1188,12 @@ KeyChain.prototype.exportSafeBag = function
  * an async Promise.
  * @return {Promise|SyncPromise} A promise which fulfills when finished.
  */
-KeyChain.prototype.importSafeBagPromise = function(safeBag, password, useSync)
+KeyChain.prototype.importSafeBagPromise = function(safeBag, word, useSync)
 {
-  if (typeof password === 'boolean') {
+  if (typeof word === 'boolean') {
     // password is omitted, so shift.
-    useSync = password;
-    password = undefined;
+    useSync = word;
+    word = undefined;
   }
 
   var certificate;
@@ -1232,7 +1232,7 @@ KeyChain.prototype.importSafeBagPromise = function(safeBag, password, useSync)
   })
   .then(function() {
     return thisKeyChain.tpm_.importPrivateKeyPromise_
-      (keyName, safeBag.getPrivateKeyBag().buf(), password, useSync)
+      (keyName, safeBag.getPrivateKeyBag().buf(), word, useSync)
     .catch(function(err) {
       return SyncPromise.reject(new KeyChain.Error(new Error
         ("Failed to import private key `" + keyName.toUri() + "`: " + err)));
