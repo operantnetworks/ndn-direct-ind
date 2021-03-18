@@ -1,4 +1,15 @@
 /**
+ * Copyright (C) 2021 Operant Networks, Incorporated.
+ *
+ * This works is based substantially on previous work as listed below:
+ *
+ * Original file: js/security/v2/static-trust-anchor-group.js
+ * Original repository: https://github.com/named-data/ndn-js
+ *
+ * Summary of Changes: Check anchor cert validity.
+ *
+ * which was originally released under the LGPL license with the following rights:
+ *
  * Copyright (C) 2018-2019 Regents of the University of California.
  * @author: Jeff Thompson <jefft0@remap.ucla.edu>
  * @author: From ndn-cxx security https://github.com/named-data/ndn-cxx/blob/master/ndn-cxx/security/v2/trust-anchor-group.cpp
@@ -19,6 +30,7 @@
  */
 
 /** @ignore */
+var LOG = require('../../log.js').Log.LOG; /** @ignore */
 var TrustAnchorGroup = require('./trust-anchor-group.js').TrustAnchorGroup;
 
 /**
@@ -45,7 +57,8 @@ exports.StaticTrustAnchorGroup = StaticTrustAnchorGroup;
 
 /**
  * Load the static anchor certificate. If a certificate with the name is already
- * added, do nothing.
+ * added or if the current time does not fall within the certificate's validity
+ * period, do nothing.
  * @param {CertificateV2} certificate The certificate to add, which is copied.
  */
 StaticTrustAnchorGroup.prototype.add = function(certificate)
@@ -53,6 +66,11 @@ StaticTrustAnchorGroup.prototype.add = function(certificate)
   var certificateNameUri = certificate.getName().toUri();
   if (this.anchorNameUris_[certificateNameUri])
     return;
+  if (!certificate.isValid()) {
+    if (LOG > 0) console.log("Static trust anchor is out of validity. Not loaded. " +
+                             certificate.getName().toUri());
+    return;
+  }
 
   this.anchorNameUris_[certificateNameUri] = true;
   // This copies the certificate.
