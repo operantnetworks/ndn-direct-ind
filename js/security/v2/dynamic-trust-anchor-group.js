@@ -1,4 +1,15 @@
 /**
+ * Copyright (C) 2021 Operant Networks, Incorporated.
+ *
+ * This works is based substantially on previous work as listed below:
+ *
+ * Original file: js/security/v2/dynamic-trust-anchor-group.js
+ * Original repository: https://github.com/named-data/ndn-js
+ *
+ * Summary of Changes: Check anchor cert validity.
+ *
+ * which was originally released under the LGPL license with the following rights:
+ *
  * Copyright (C) 2018-2019 Regents of the University of California.
  * @author: Jeff Thompson <jefft0@remap.ucla.edu>
  * @author: From ndn-cxx security https://github.com/named-data/ndn-cxx/blob/master/ndn-cxx/security/v2/trust-anchor-group.cpp
@@ -68,7 +79,8 @@ DynamicTrustAnchorGroup.prototype.name = "DynamicTrustAnchorGroup";
 exports.DynamicTrustAnchorGroup = DynamicTrustAnchorGroup;
 
 /**
- * Request a certificate refresh.
+ * Request a certificate refresh. If the current time does not fall within the
+ * certificate's validity period, don't load it.
  */
 DynamicTrustAnchorGroup.prototype.refresh = function()
 {
@@ -117,6 +129,12 @@ DynamicTrustAnchorGroup.prototype.loadCertificate_ = function
 {
   var certificate = TrustAnchorGroup.readCertificate(file);
   if (certificate != null) {
+    if (!certificate.isValid()) {
+      if (LOG > 0) console.log("Dynamic trust anchor is out of validity. Not loaded. " +
+                               certificate.getName().toUri());
+      return;
+    }
+
     var certificateNameUri = certificate.getName().toUri();
 
     if (!this.anchorNameUris_[certificateNameUri]) {
