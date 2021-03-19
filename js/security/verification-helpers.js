@@ -1,4 +1,15 @@
 /**
+ * Copyright (C) 2021 Operant Networks, Incorporated.
+ *
+ * This works is based substantially on previous work as listed below:
+ *
+ * Original file: js/security/verification-helpers.js
+ * Original repository: https://github.com/named-data/ndn-js
+ *
+ * Summary of Changes: Use CertificateV2 getSignedEncoding.
+ *
+ * which was originally released under the LGPL license with the following rights:
+ *
  * Copyright (C) 2017-2019 Regents of the University of California.
  * @author: Jeff Thompson <jefft0@remap.ucla.edu>
  * @author: From ndn-cxx security https://github.com/named-data/ndn-cxx/blob/master/ndn-cxx/security/verification-helpers.cpp
@@ -193,7 +204,8 @@ VerificationHelpers.verifySignature = function
  * Verify the Data packet using the public key. This does not check the type of
  * public key or digest algorithm against the type of SignatureInfo in the Data
  * packet such as Sha256WithRsaSignature.
- * @param {Data} data The Data packet to verify.
+ * @param {Data} data The Data packet to verify. If this is a CertificateV2,
+ * then call getSignedEncoding() and getSignatureValue().
  * @param {PublicKey|Buffer|Blob|CertificateV2} publicKeyOrCertificate The
  * object containing the public key, or the public key DER which is used to make
  * the PublicKey object, or the certificate containing the public key.
@@ -255,10 +267,23 @@ VerificationHelpers.verifyDataSignaturePromise = function
   else
     publicKey = publicKeyOrCertificate;
 
-  var encoding = data.wireEncode(wireFormat);
+  var signedEncoding;
+  var signatureValue;
+  if (data instanceof CertificateV2) {
+    // Special case: Use the CertificateV2 methods which may have special processing.
+    signedEncoding = data.getSignedEncoding(wireFormat);
+    if (signedEncoding.isNull())
+      return SyncPromise.resolve(false);
+    signatureValue = data.getSignatureValue();
+  }
+  else {
+    signedEncoding = data.wireEncode(wireFormat);
+    signatureValue = data.getSignature().getSignature();
+  }
+
   return VerificationHelpers.verifySignaturePromise
-    (encoding.signedBuf(), data.getSignature().getSignature(), publicKey,
-     digestAlgorithm, useSync);
+    (signedEncoding.signedBuf(), signatureValue, publicKey, digestAlgorithm,
+     useSync);
 };
 
 /**

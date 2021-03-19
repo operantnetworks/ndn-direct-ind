@@ -152,6 +152,18 @@ ValidationPolicy.getKeyLocatorName = function(dataOrInterest, state)
 {
   if (dataOrInterest instanceof Data) {
     var data = dataOrInterest;
+    if (data instanceof CertificateV2) {
+      var certificate = data;
+      // Special case: Use the CertificateV2 methods which may have special processing.
+      if (!certificate.hasIssuerName()) {
+        state.fail(new ValidationError
+          (ValidationError.INVALID_KEY_LOCATOR, "The certificate issuer name is missing"));
+        return new Name();
+      }
+
+      return certificate.getIssuerName();
+    }
+
     return ValidationPolicy.getKeyLocatorNameFromSignature_
       (data.getSignature(), state);
   }

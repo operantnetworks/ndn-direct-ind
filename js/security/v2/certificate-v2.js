@@ -1,4 +1,15 @@
 /**
+ * Copyright (C) 2021 Operant Networks, Incorporated.
+ *
+ * This works is based substantially on previous work as listed below:
+ *
+ * Original file: js/security/v2/certificate-v2.js
+ * Original repository: https://github.com/named-data/ndn-js
+ *
+ * Summary of Changes: Add getSignedEncoding and getSignatureValue.
+ *
+ * which was originally released under the LGPL license with the following rights:
+ *
  * Copyright (C) 2017-2019 Regents of the University of California.
  * @author: Jeff Thompson <jefft0@remap.ucla.edu>
  * @author: From ndn-cxx security https://github.com/named-data/ndn-cxx/blob/master/ndn-cxx/security/v2/certificate.hpp
@@ -27,6 +38,7 @@ var Sha256WithRsaSignature = require('../../sha256-with-rsa-signature.js').Sha25
 var Sha256WithEcdsaSignature = require('../../sha256-with-ecdsa-signature.js').Sha256WithEcdsaSignature; /** @ignore */
 var ContentType = require('../../meta-info.js').ContentType; /** @ignore */
 var WireFormat = require('../../encoding/wire-format.js').WireFormat; /** @ignore */
+var SignedBlob = require('../../util/signed-blob.js').SignedBlob; /** @ignore */
 var ValidityPeriod = require('../validity-period.js').ValidityPeriod; /** @ignore */
 var InvalidArgumentException = require('../security-exception.js').InvalidArgumentException;
 
@@ -217,6 +229,55 @@ CertificateV2.prototype.getValidityPeriod = function()
 CertificateV2.prototype.isValid = function(time)
 {
   return this.getValidityPeriod().isValid(time);
+};
+
+/**
+ * Check if this certificate has an issuer name in the signature's key locator.
+ * @return {boolean} True if this has an issue name.
+ */
+CertificateV2.prototype.hasIssuerName = function()
+{
+  return KeyLocator.canGetFromSignature(this.getSignature()) &&
+    KeyLocator.getFromSignature(this.getSignature()).getType() === KeyLocatorType.KEYNAME;
+};
+
+/**
+ * Get the issuer name from the signature's key locator. You should first call
+ * hasIssuerName() to check if it exists.
+ * @return {Name} The issuer name.
+ */
+CertificateV2.prototype.getIssuerName = function()
+{
+  return KeyLocator.getFromSignature(this.getSignature()).getKeyName();
+};
+
+/**
+ * Get the SignedBlob of the encoding with the offsets for the signed portion.
+ * @param {WireFormat} wireFormat (optional) A WireFormat object used to encode
+ * the Data packet. If omitted, use WireFormat getDefaultWireFormat().
+ * @return {SignedBlob} The SignedBlob of the encoding, or an isNull() Blob if
+ * can't encode.
+ */
+CertificateV2.prototype.getSignedEncoding = function(wireFormat)
+{
+  var signedEncoding = new SignedBlob();
+  try {
+    // This will use a cached encoding if available.
+    signedEncoding = this.wireEncode(wireFormat);
+  } catch (err) {
+    // The signedEncoding isNull().
+  }
+
+  return signedEncoding;
+};
+
+/**
+ * Get the signature value.
+ * @return {Blob} A Blob with the bytes of the signature value..
+ */
+CertificateV2.prototype.getSignatureValue = function()
+{
+  return this.getSignature().getSignature();
 };
 
 // TODO: getExtension
