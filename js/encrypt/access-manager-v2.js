@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2020 Operant Networks, Incorporated.
+ * Copyright (C) 2020-2021 Operant Networks, Incorporated.
  * @author: Jeff Thompson <jefft0@gmail.com>
  *
  * This works is based substantially on previous work as listed below:
@@ -7,7 +7,7 @@
  * Original file: js/encrypt/access-manager-v2.js
  * Original repository: https://github.com/named-data/ndn-js
  *
- * Summary of Changes: Support GCK, async TPM.
+ * Summary of Changes: Support GCK, async TPM, memberValidator.
  *
  * which was originally released under the LGPL license with the following rights:
  *
@@ -44,6 +44,9 @@ var EncryptAlgorithmType = require('./algo/encrypt-params.js').EncryptAlgorithmT
 var InMemoryStorageRetaining = require('../in-memory-storage/in-memory-storage-retaining.js').InMemoryStorageRetaining; /** @ignore */
 var NdnCommon = require('../util/ndn-common.js').NdnCommon; /** @ignore */
 var EncryptorV2 = require('./encryptor-v2.js').EncryptorV2; /** @ignore */
+var Interest = require('../interest.js').Interest; /** @ignore */
+var DataValidationState = require('../security/v2/data-validation-state.js').DataValidationState; /** @ignore */
+var CertificateRequest = require('../security/v2/certificate-request.js').CertificateRequest; /** @ignore */
 var SyncPromise = require('../util/sync-promise.js').SyncPromise; /** @ignore */
 var LOG = require('../log.js').Log.LOG;
 
@@ -105,6 +108,8 @@ var AccessManagerV2 = function AccessManagerV2
 
   // storage_ is for the KEK and KDKs (or GCKs).
   this.storage_ = new InMemoryStorageRetaining();
+  this.memberValidator_ = null;
+  this.onMemberAdded_ = null;
   this.kekRegisteredPrefixId_ = 0;
   this.kdkRegisteredPrefixId_ = 0;
 
@@ -172,6 +177,23 @@ AccessManagerV2.prototype.addMember = function(memberCertificate, onComplete, on
 {
   return SyncPromise.complete(onComplete, onError,
     this.addMemberPromise(memberCertificate, !onComplete));
+};
+
+/**
+ * Set the Validator which is used to fetch and validate the certificate for the
+ * public key in an incoming key request.
+ * @param {Validator} memberValidator The Validator to fetch and validate the member
+ * certificate. This replaces any previous member Validator.
+ * @param {function} (optional) When a new member is added, this calls
+ * onMemberAdded(data) with the published Data packet for the new member (the
+ * same as the return value from addMember). If onMemberAdded is null or omitted
+ * then don't use it.
+ */
+AccessManagerV2.prototype.setMemberValidator = function
+  (memberValidator, onMemberAdded)
+{
+  this.memberValidator_ = memberValidator;
+  this.onMemberAdded_ = onMemberAdded;
 };
 
 /**
@@ -275,9 +297,10 @@ AccessManagerV2.prototype.addMemberForKdkPromise_ = function
 };
 
 /**
- * Generate a new random group content key. You must call addMember again for
- * each member to create the GCK Data packet for the member (which allows you
- * to omit a member's access to the new key if they no longer belong to the group).
+ * Generate a new random group content key. You must call setMemberValidator
+ * again or call addMember for each member to create the GCK Data packet for the
+ * member (which allows you to omit a member's access to the new key if they no
+ * longer belong to the group).
  * @throws Error If the constructor was not called with a groupContentKeyAlgorithmType.
  */
 AccessManagerV2.prototype.refreshGck = function()
@@ -292,6 +315,10 @@ AccessManagerV2.prototype.refreshGck = function()
 
   if (LOG > 3) console.log("Generating new GCK: " + this.gckName_.toUri());
   this.gckBits_ = Crypto.randomBytes(this.gckBits_.length);
+
+  // The application must add the members again.
+  this.storage_.clear();
+  this.memberValidator_ = null;
 };
 
 /**
@@ -301,6 +328,25 @@ AccessManagerV2.prototype.refreshGck = function()
 AccessManagerV2.prototype.size = function()
 {
   return this.storage_.size();
+};
+
+/**
+ * Get the sub name after the ENCRRYPTED_BY component. (The result is the
+ * member's public key name.
+ * @param {Name} name The name with the ENCRRYPTED_BY component.
+ * @returns {Name} The sub name after the ENCRRYPTED_BY component, or an empty
+ * name if not found.
+ */
+AccessManagerV2.getEncryptedBy = function(name)
+{
+  // Search the name backwards for ENCRYPTED_BY.
+  for (var i = name.size() - 1; i >= 0; --i) {
+    if (name.get(i).equals(EncryptorV2.NAME_COMPONENT_ENCRYPTED_BY))
+      return name.getSubName(i + 1);
+  }
+
+  // Not found.
+  return new Name();
 };
 
 AccessManagerV2.prototype.initializeForGck_ = function(dataset)
@@ -339,6 +385,9 @@ AccessManagerV2.prototype.initializeForGck_ = function(dataset)
                     NdnCommon.getErrorWithStackTrace(ex));
       }
     }
+    else if (thisManager.memberValidator_ != null)
+      // This will log an error if can't find.
+      thisManager.fetchAndAddmember_(interest, face);
     else {
       if (LOG > 3) console.log
         ("Didn't find data for " + interest.getName().toUri());
@@ -354,6 +403,70 @@ AccessManagerV2.prototype.initializeForGck_ = function(dataset)
     .append(EncryptorV2.NAME_COMPONENT_GCK);
   this.kdkRegisteredPrefixId_ = this.face_.registerPrefix
     (gckPrefix, onInterest, onRegisterFailed);
+};
+
+/**
+ * Use memberValidator_.getFetcher() to fetch and validate the certificate for
+ * the member's public key named in the interest. Then call addMember and put
+ * the resulting Data packet to the face. As usual, addMember adds the Data
+ * packet to storage_ so that it can be returned if requested again. If
+ * onMemberAdded_ is not null, call onMemberAdded_(data) with the published Data
+ * packet.
+ * @param {Interest} interest The incoming Interest where the name has the member's
+ * public key name following the ENCRYPTED_BY component.
+ * @param {Face} face When the response Data packet has been created, call
+ * face.putData().
+ */
+AccessManagerV2.prototype.fetchAndAddmember_ = function(interest, face)
+{
+  var memberKeyName = AccessManagerV2.getEncryptedBy(interest.getName());
+  if (memberKeyName.size() <= 0) {
+    if (LOG > 3) console.log
+      ("AccessManagerV2: Can't find ENCRYPTED_BY in " + interest.getName().toUri());
+    return;
+  }
+
+  // In the ValidationState, we only need the failure callback.
+  var state = new DataValidationState
+    (null, function(d) {}, function(d, error) {
+      console.log("AccessManagerV2: Failed to fetch member certificate: " +
+        error.toString() + ": onInterest: " + interest.getName().toUri());
+    });
+  var thisManager = this;
+  // Fetch the member certificate.
+  this.memberValidator_.getFetcher().fetch
+    (new CertificateRequest(new Interest(memberKeyName)), state,
+     function(memberCertificate, s) {
+       // Validate the member certificate.
+       thisManager.memberValidator_.validate
+         (memberCertificate,
+          function(d) {
+            // Add the member.
+            thisManager.addMember(memberCertificate, function(data) {
+              if (LOG > 3) console.log("Serving " + data.getName().toUri());
+              try {
+                face.putData(data);
+              } catch (ex) {
+                console.log("AccessManagerV2: Error in Face.putData: " +
+                            NdnCommon.getErrorWithStackTrace(ex));
+              }
+
+              if (thisManager.onMemberAdded_ != null) {
+                try {
+                  thisManager.onMemberAdded_(data);
+                } catch (ex) {
+                  console.log("AccessManagerV2: Error in onMemberAdded: " +
+                              NdnCommon.getErrorWithStackTrace(ex));
+                }
+              }
+            });
+          },
+          function(d, error) {
+            if (LOG > 3) console.log
+              ("AccessManagerV2: Validate member certificate failure: " +
+               error.toString() + ": " + d.getName().toUri());
+          });
+     });
 };
 
 AccessManagerV2.prototype.initializeForKdk_ = function(dataset)
