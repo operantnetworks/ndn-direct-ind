@@ -1,4 +1,15 @@
 /**
+ * Copyright (C) 2021 Operant Networks, Incorporated.
+ *
+ * This works is based substantially on previous work as listed below:
+ *
+ * Original file: js/encoding/der/der-node.js
+ * Original repository: https://github.com/named-data/ndn-js
+ *
+ * Summary of Changes: Add DerSet.
+ *
+ * which was originally released under the LGPL license with the following rights:
+ *
  * Copyright (C) 2014-2019 Regents of the University of California.
  * @author: Jeff Thompson <jefft0@remap.ucla.edu>
  * @author: From PyNDN der_node.py by Adeola Bannis <thecodemaiden@gmail.com>.
@@ -45,6 +56,18 @@ var DerNode = function DerNode(nodeType)
 };
 
 exports.DerNode = DerNode;
+
+/**
+ * Get the number of bytes of the encoded header (not the size field in the
+ * header).
+ * @return {number} The header size.
+ */
+DerNode.prototype.getHeaderSize = function()
+{
+  // Call getSize() which may update the header.
+  this.getSize();
+  return this.header_.length;
+};
 
 /**
  * Return the number of bytes in DER
@@ -190,6 +213,9 @@ DerNode.prototype.payloadAppend = function(buffer)
  */
 DerNode.parse = function(inputBuf, startIdx)
 {
+  if (inputBuf instanceof Blob)
+    inputBuf = inputBuf.buf();
+
   if (startIdx == undefined)
     startIdx = 0;
 
@@ -214,10 +240,20 @@ DerNode.parse = function(inputBuf, startIdx)
     newNode = new DerNode.DerOid();
   else if (nodeType === DerNodeType.Sequence)
     newNode = new DerNode.DerSequence();
+  else if (nodeType === DerNodeType.Set)
+    newNode = new DerNode.DerSet();
+  else if (nodeType === DerNodeType.Utf8String)
+    newNode = new DerNode.DerUtf8String();
   else if (nodeType === DerNodeType.PrintableString)
     newNode = new DerNode.DerPrintableString();
+  else if (nodeType === DerNodeType.Ia5String)
+    newNode = new DerNode.DerIa5String();
+  else if (nodeType === DerNodeType.UtcTime)
+    newNode = new DerNode.DerUtcTime();
   else if (nodeType === DerNodeType.GeneralizedTime)
     newNode = new DerNode.DerGeneralizedTime();
+  else if (DerNode.DerStructure.isExplicitNode(nodeType))
+    newNode = new DerNode.DerExplicit(nodeType & 0x1f);
   else
     throw new DerDecodingException(new Error("Unimplemented DER type " + nodeType));
 
@@ -245,16 +281,16 @@ DerNode.prototype.getPayload = function()
 };
 
 /**
- * If this object is a DerNode.DerSequence, get the children of this node.
- * Otherwise, throw an exception. (DerSequence overrides to implement this
+ * If this object is a DerNode.DerSequence or DerSet, get the children of this node.
+ * Otherwise, throw an exception. (DerSequence and DerSet override to implement this
  * method.)
  * @return {Array<DerNode>} The children as an array of DerNode.
- * @throws DerDecodingException if this object is not a DerSequence.
+ * @throws DerDecodingException if this object is not a DerSequence or DerSet.
  */
 DerNode.prototype.getChildren = function()
 {
   throw new DerDecodingException(new Error
-    ("getChildren: This DerNode is not DerSequence"));
+    ("getChildren: This DerNode is not DerSequence or DerSet"));
 };
 
 /**
@@ -282,7 +318,7 @@ DerNode.getSequence = function(children, index)
 /**
  * A DerStructure extends DerNode to hold other DerNodes.
  * Create a DerStructure with the given nodeType. This is a private
- * constructor. To create an object, use DerSequence.
+ * constructor. To create an object, use DerSequence or DerSet.
  * @param {number} nodeType One of the defined DER DerNodeType constants.
  */
 DerNode.DerStructure = function DerStructure(nodeType)
@@ -342,6 +378,9 @@ DerNode.DerStructure.prototype.updateSize = function()
  */
 DerNode.DerStructure.prototype.addChild = function(node, notifyParent)
 {
+  if (DerNode.DerStructure.isExplicitNode(this.nodeType_) &&
+      this.nodeList_.length >= 1)
+    throw DerDecodingException("An explicit node can have only one child");
   node.parent_ = this;
   this.nodeList_.push(node);
 
@@ -405,6 +444,16 @@ DerNode.DerStructure.prototype.decode = function(inputBuf, startIdx)
     accSize += size;
     this.addChild(node, false);
   }
+};
+
+/**
+ * Check if the node type is for an explicit node.
+ * @param {number} nodeType The node type byte
+ * @return {boolean} True if for explicit.
+ */
+DerNode.DerStructure.isExplicitNode = function(nodeType)
+{
+  return (nodeType & 0xe0) === 0xa0;
 };
 
 ////////
@@ -757,6 +806,33 @@ DerNode.DerSequence.prototype = new DerNode.DerStructure();
 DerNode.DerSequence.prototype.name = "DerSequence";
 
 /**
+ * A DerSet extends DerStructure to contains an ordered sequence of other
+ * nodes.
+ * Create a DerSet.
+ */
+DerNode.DerSet = function DerSet()
+{
+  // Call the base constructor.
+  DerNode.DerStructure.call(this, DerNodeType.Set);
+};
+DerNode.DerSet.prototype = new DerNode.DerStructure();
+DerNode.DerSet.prototype.name = "DerSet";
+
+/**
+ * A DerUtf8String extends DerByteString to handle a a printable string. No
+ * escaping or other modification is done to the string.
+ * Create a DerUtf8String with the given inputData.
+ * @param {Buffer} inputData An input buffer containing the string to encode.
+ */
+DerNode.DerUtf8String = function DerUtf8String(inputData)
+{
+  // Call the base constructor.
+  DerNode.DerByteString.call(this, inputData, DerNodeType.Utf8String);
+};
+DerNode.DerUtf8String.prototype = new DerNode.DerByteString();
+DerNode.DerUtf8String.prototype.name = "DerUtf8String";
+
+/**
  * A DerPrintableString extends DerByteString to handle a a printable string. No
  * escaping or other modification is done to the string.
  * Create a DerPrintableString with the given inputData.
@@ -769,6 +845,89 @@ DerNode.DerPrintableString = function DerPrintableString(inputData)
 };
 DerNode.DerPrintableString.prototype = new DerNode.DerByteString();
 DerNode.DerPrintableString.prototype.name = "DerPrintableString";
+
+/**
+ * DerIa5String extends DerByteString to handle an IA5 string.
+ * Create a new DerIa5String for the inputData.
+ * @param {Buffer} inputData An input buffer containing the string to encode.
+ */
+DerNode.DerIa5String = function DerIa5String(inputData)
+{
+  // Call the base constructor.
+  DerNode.DerByteString.call(this, inputData, DerNodeType.Ia5String);
+};
+DerNode.DerIa5String.prototype = new DerNode.DerByteString();
+DerNode.DerIa5String.prototype.name = "DerIa5String";
+
+/**
+ * A DerUtcTime extends DerByteString to handle a UTC time. No escaping or other
+ * modification is done to the string.
+ * Create a DerUtcTime with the given inputData.
+ * @param {Buffer} inputData An input buffer containing the string to encode.
+ */
+DerNode.DerUtcTime = function DerUtcTime(inputData)
+{
+  // Call the base constructor.
+  DerNode.DerByteString.call(this, inputData, DerNodeType.UtcTime);
+};
+DerNode.DerUtcTime.prototype = new DerNode.DerByteString();
+DerNode.DerUtcTime.prototype.name = "DerUtcTime";
+
+/**
+ * A DerUtcTime extends DerNode to represent a date and time in UTC format.
+ * Create a DerUtcTime with the given time.
+ * @param {number} msSince1970 The timestamp as milliseconds since Jan 1, 1970.
+ */
+DerNode.DerUtcTime = function DerUtcTime(msSince1970)
+{
+  // Call the base constructor.
+  DerNode.call(this, DerNodeType.UtcTime);
+
+  if (msSince1970 != undefined) {
+    var utcTime = DerNode.DerUtcTime.toUtcTimeString(msSince1970);
+    // Use Blob to convert to a Buffer.
+    this.payloadAppend(new Blob(utcTime).buf());
+    this.encodeHeader(this.payloadPosition_);
+  }
+};
+DerNode.DerUtcTime.prototype = new DerNode();
+DerNode.DerUtcTime.prototype.name = "DerUtcTime";
+
+/**
+ * Convert a UNIX timestamp to the internal string representation.
+ * @param {type} msSince1970 Timestamp as milliseconds since Jan 1, 1970.
+ * @return {string} The string representation.
+ */
+DerNode.DerUtcTime.toUtcTimeString = function(msSince1970)
+{
+  var utcTime = new Date(Math.round(msSince1970));
+  // Strip the first two digits of the year.
+  return DerNode.DerGeneralizedTime.to2DigitString(utcTime.getUTCFullYear() % 100) +
+         DerNode.DerGeneralizedTime.to2DigitString(utcTime.getUTCMonth() + 1) +
+         DerNode.DerGeneralizedTime.to2DigitString(utcTime.getUTCDate()) +
+         DerNode.DerGeneralizedTime.to2DigitString(utcTime.getUTCHours()) +
+         DerNode.DerGeneralizedTime.to2DigitString(utcTime.getUTCMinutes()) +
+         DerNode.DerGeneralizedTime.to2DigitString(utcTime.getUTCSeconds()) +
+         "Z";
+};
+
+/**
+ * Override to return the milliseconds since 1970.
+ * @return {number} The timestamp value as milliseconds since 1970.
+ */
+DerNode.DerUtcTime.prototype.toVal = function()
+{
+  var timeStr = this.payload_.slice(0, this.payloadPosition_).toString();
+  var year2Digits = parseInt(timeStr.substr(0, 2));
+  var year = (year2Digits >= 50 ? 1900 : 2000) + year2Digits;
+  return Date.UTC
+    (year,
+     parseInt(timeStr.substr(2, 2) - 1),
+     parseInt(timeStr.substr(4, 2)),
+     parseInt(timeStr.substr(6, 2)),
+     parseInt(timeStr.substr(8, 2)),
+     parseInt(timeStr.substr(10, 2)));
+};
 
 /**
  * A DerGeneralizedTime extends DerNode to represent a date and time, with
@@ -833,4 +992,27 @@ DerNode.DerGeneralizedTime.prototype.toVal = function()
      parseInt(timeStr.substr(8, 2)),
      parseInt(timeStr.substr(10, 2)),
      parseInt(timeStr.substr(12, 2)));
+};
+
+/**
+ * A DerExplicit is a structure with a specific tag and holds one child.
+ * Create a DerExplicit with the given tag.
+ * @param tag The tag which must be less than or equal to 0x1f.
+ * @throws DerDecodingException if the tag is not less than or equal to 0x1f.
+ */
+DerNode.DerExplicit = function DerExplicit(tag)
+{
+  // Call the base constructor.
+  DerNode.DerStructure.call(this, 0xa0 | tag);
+
+  if (tag > 0x1f)
+    throw new DerDecodingException
+      ("The explicit tag must be less than or equal to 0x1f");
+};
+DerNode.DerExplicit.prototype = new DerNode.DerStructure();
+DerNode.DerExplicit.prototype.name = "DerExplicit";
+
+DerNode.DerExplicit.prototype.getTag = function()
+{
+  return this.nodeType_ & 0x1f;
 };
