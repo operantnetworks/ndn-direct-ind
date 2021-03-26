@@ -67,6 +67,11 @@ InMemoryStorageRetaining.prototype.find = function(interest)
 };
 
 /**
+ * Clear the cache.
+ */
+InMemoryStorageRetaining.prototype.clear = function() { this.cache_ = []; }
+
+/**
  * Get the number of packets stored in the in-memory storage.
  * @returns {number} The number of packets.
  */
