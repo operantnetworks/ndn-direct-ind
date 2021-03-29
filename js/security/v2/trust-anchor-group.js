@@ -74,6 +74,10 @@ TrustAnchorGroup.readCertificate = function(filePath)
 {
   try {
     var encodedData = fs.readFileSync(filePath).toString();
+    // Strip possible X.509 header and footer.
+    encodedData = encodedData.replace("-----BEGIN CERTIFICATE-----", "");
+    encodedData = encodedData.replace("-----END CERTIFICATE-----", "");
+
     var decodedData = new Buffer(encodedData, 'base64');
     var result = new CertificateV2();
     result.wireDecode(new Blob(decodedData, false));
