@@ -110,8 +110,17 @@ var CertificateV2 = function CertificateV2(data)
   // Call the base constructor.
   if (data != undefined) {
     Data.call(this, data);
-    if (data instanceof X509CertificateInfo)
+    if (data instanceof CertificateV2)
       this.x509Info_ = data.x509Info_;
+    else if (this.getSignature() instanceof DigestSha256Signature) {
+      // The signature is DigestSha256. Try to decode the content as an X.509 certificate.
+      try {
+        this.x509Info_ = new X509CertificateInfo(this.getContent());
+      } catch (ex) {
+        // The content doesn't seem to be an X.509 certificate. Ignore.
+      }
+    }
+
     this.checkFormat_();
   }
   else {
@@ -357,8 +366,6 @@ CertificateV2.prototype.wireDecode = function(input, wireFormat)
   }
 
   Data.prototype.wireDecode.call(this, input, wireFormat);
-  this.checkFormat_();
-
   if (this.getSignature() instanceof DigestSha256Signature) {
     // The signature is DigestSha256. Try to decode the content as an X.509 certificate.
     try {
@@ -367,6 +374,8 @@ CertificateV2.prototype.wireDecode = function(input, wireFormat)
       // The content doesn't seem to be an X.509 certificate. Ignore.
     }
   }
+
+  this.checkFormat_();
 };
 
 /**

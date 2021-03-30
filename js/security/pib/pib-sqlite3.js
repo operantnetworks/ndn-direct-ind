@@ -1,4 +1,15 @@
 /**
+ * Copyright (C) 2021 Operant Networks, Incorporated.
+ *
+ * This works is based substantially on previous work as listed below:
+ *
+ * Original file: js/security/pib/pib-sqlite3.js
+ * Original repository: https://github.com/named-data/ndn-js
+ *
+ * Summary of Changes: Use CertificateV2.getPublicKey().
+ *
+ * which was originally released under the LGPL license with the following rights:
+ *
  * Copyright (C) 2017-2019 Regents of the University of California.
  * @author: Jeff Thompson <jefft0@remap.ucla.edu>
  * @author: From ndn-cxx security https://github.com/named-data/ndn-cxx/blob/master/ndn-cxx/security/pib/pib-sqlite3.cpp
@@ -678,9 +689,9 @@ PibSqlite3.prototype.addCertificatePromise = function(certificate, useSync)
   var thisPib = this;
 
   // Ensure the key exists.
-  var content = certificate.getContent()
+  var publicKey = certificate.getPublicKey()
   return this.addKeyPromise
-    (certificate.getIdentity(), certificate.getKeyName(), content.buf())
+    (certificate.getIdentity(), certificate.getKeyName(), publicKey.buf())
   .then(function() {
     return thisPib.hasCertificatePromise(certificate.getName());
   })

@@ -1,4 +1,15 @@
 /**
+ * Copyright (C) 2021 Operant Networks, Incorporated.
+ *
+ * This works is based substantially on previous work as listed below:
+ *
+ * Original file: js/security/v2/validator-config/config-checker.js
+ * Original repository: https://github.com/named-data/ndn-js
+ *
+ * Summary of Changes: Don't check key locator name if matching all.
+ *
+ * which was originally released under the LGPL license with the following rights:
+ *
  * Copyright (C) 2018-2019 Regents of the University of California.
  * @author: Jeff Thompson <jefft0@remap.ucla.edu>
  * @author: From ndn-cxx security https://github.com/named-data/ndn-cxx/blob/master/ndn-cxx/security/v2/validator-config/checker.cpp
@@ -264,6 +275,11 @@ ConfigNameRelationChecker.prototype.checkNames = function
   (packetName, keyLocatorName, state)
 {
   // packetName is not used in this check.
+
+  if (this.relation_ === ConfigNameRelation.Relation.IS_PREFIX_OF &&
+      this.name_.size() === 0)
+    // An empty name is a prefix of every name, so skip other tests.
+    return true;
 
   var identity = PibKey.extractIdentityFromKeyName(keyLocatorName);
   var result = ConfigNameRelation.checkNameRelation
