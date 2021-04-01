@@ -1,4 +1,15 @@
 /**
+ * Copyright (C) 2021 Operant Networks, Incorporated.
+ *
+ * This works is based substantially on previous work as listed below:
+ *
+ * Original file: js/security/pib/pib-memory.js
+ * Original repository: https://github.com/named-data/ndn-js
+ *
+ * Summary of Changes: Use CertificateV2.getPublicKey().
+ *
+ * which was originally released under the LGPL license with the following rights:
+ *
  * Copyright (C) 2017-2019 Regents of the University of California.
  * @author: Jeff Thompson <jefft0@remap.ucla.edu>
  * @author: From ndn-cxx security https://github.com/named-data/ndn-cxx/blob/master/ndn-cxx/security/pib/pib-memory.cpp
@@ -440,7 +451,7 @@ PibMemory.prototype.addCertificatePromise = function(certificate)
   var keyNameCopy = certificate.getKeyName();
   var identity = certificate.getIdentity();
 
-  this.addKey_(identity, keyNameCopy, certificate.getContent().buf());
+  this.addKey_(identity, keyNameCopy, certificate.getPublicKey().buf());
 
   this.certificates_[certificateNameCopy.toUri()] =
     new CertificateV2(certificate);

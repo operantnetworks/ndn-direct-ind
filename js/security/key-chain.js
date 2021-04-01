@@ -1,13 +1,12 @@
 /**
  * Copyright (C) 2020 Operant Networks, Incorporated.
- * @author: Jeff Thompson <jefft0@gmail.com>
  *
  * This works is based substantially on previous work as listed below:
  *
  * Original file: js/security/key-chain.js
  * Original repository: https://github.com/named-data/ndn-js
  *
- * Summary of Changes: Remove security v1.
+ * Summary of Changes: Remove security v1. Use CertificateV2.getPublicKey().
  *
  * which was originally released under the LGPL license with the following rights:
  *
@@ -584,7 +583,7 @@ KeyChain.prototype.setDefaultKey = function(identity, key, onComplete, onError)
 KeyChain.prototype.addCertificatePromise = function(key, certificate, useSync)
 {
   if (!key.getName().equals(certificate.getKeyName()) ||
-      !certificate.getContent().equals(key.getPublicKey()))
+      !certificate.getPublicKey().equals(key.getPublicKey()))
     return SyncPromise.reject(new Error
       ("Key `" + key.getName().toUri() + "` does not match certificate `" +
        certificate.getKeyName().toUri() + "`"));

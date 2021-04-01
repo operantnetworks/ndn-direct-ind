@@ -1,4 +1,15 @@
 /**
+ * Copyright (C) 2021 Operant Networks, Incorporated.
+ *
+ * This works is based substantially on previous work as listed below:
+ *
+ * Original file: js/security/v2/certificate-v2.js
+ * Original repository: https://github.com/named-data/ndn-js
+ *
+ * Summary of Changes: Add getSignedEncoding and getSignatureValue.
+ *
+ * which was originally released under the LGPL license with the following rights:
+ *
  * Copyright (C) 2017-2019 Regents of the University of California.
  * @author: Jeff Thompson <jefft0@remap.ucla.edu>
  * @author: From ndn-cxx security https://github.com/named-data/ndn-cxx/blob/master/ndn-cxx/security/v2/certificate.hpp
@@ -19,14 +30,20 @@
  */
 
 /** @ignore */
+var Crypto = require('../../crypto.js'); /** @ignore */
 var Name = require('../../name.js').Name; /** @ignore */
 var Data = require('../../data.js').Data; /** @ignore */
 var KeyLocator = require('../../key-locator.js').KeyLocator; /** @ignore */
 var KeyLocatorType = require('../../key-locator.js').KeyLocatorType; /** @ignore */
 var Sha256WithRsaSignature = require('../../sha256-with-rsa-signature.js').Sha256WithRsaSignature; /** @ignore */
 var Sha256WithEcdsaSignature = require('../../sha256-with-ecdsa-signature.js').Sha256WithEcdsaSignature; /** @ignore */
+var DigestSha256Signature = require('../../digest-sha256-signature.js').DigestSha256Signature; /** @ignore */
+var X509CertificateInfo = require('../../security/certificate/x509-certificate-info').X509CertificateInfo; /** @ignore */
+var DerNodeType = require('../../encoding/der/der-node-type.js').DerNodeType; /** @ignore */
+var Blob = require('../../util/blob.js').Blob; /** @ignore */
 var ContentType = require('../../meta-info.js').ContentType; /** @ignore */
 var WireFormat = require('../../encoding/wire-format.js').WireFormat; /** @ignore */
+var SignedBlob = require('../../util/signed-blob.js').SignedBlob; /** @ignore */
 var ValidityPeriod = require('../validity-period.js').ValidityPeriod; /** @ignore */
 var InvalidArgumentException = require('../security-exception.js').InvalidArgumentException;
 
@@ -88,9 +105,22 @@ var InvalidArgumentException = require('../security-exception.js').InvalidArgume
  */
 var CertificateV2 = function CertificateV2(data)
 {
+  this.x509Info_ = null;
+
   // Call the base constructor.
   if (data != undefined) {
     Data.call(this, data);
+    if (data instanceof CertificateV2)
+      this.x509Info_ = data.x509Info_;
+    else if (this.getSignature() instanceof DigestSha256Signature) {
+      // The signature is DigestSha256. Try to decode the content as an X.509 certificate.
+      try {
+        this.x509Info_ = new X509CertificateInfo(this.getContent());
+      } catch (ex) {
+        // The content doesn't seem to be an X.509 certificate. Ignore.
+      }
+    }
+
     this.checkFormat_();
   }
   else {
@@ -135,7 +165,7 @@ CertificateV2.prototype.checkFormat_ = function()
     throw new CertificateV2.Error(new Error
       ("The Data FreshnessPeriod is not set"));
 
-  if (this.getContent().size() == 0)
+  if (this.x509Info_ == null && this.getContent().size() == 0)
     throw new CertificateV2.Error(new Error("The Data Content is empty"));
 };
 
@@ -145,6 +175,9 @@ CertificateV2.prototype.checkFormat_ = function()
  */
 CertificateV2.prototype.getKeyName = function()
 {
+  if (this.getName().size() < CertificateV2.MIN_CERT_NAME_LENGTH)
+    throw new CertificateV2.Error(new Error
+      ("The certificate has an encapsulated X.509 name, not an NDN cert name"));
   return this.getName().getPrefix(CertificateV2.KEY_ID_OFFSET + 1);
 };
 
@@ -154,6 +187,9 @@ CertificateV2.prototype.getKeyName = function()
  */
 CertificateV2.prototype.getIdentity = function()
 {
+  if (this.getName().size() < CertificateV2.MIN_CERT_NAME_LENGTH)
+    throw new CertificateV2.Error(new Error
+      ("The certificate has an encapsulated X.509 name, not an NDN cert name"));
   return this.getName().getPrefix(CertificateV2.KEY_COMPONENT_OFFSET);
 };
 
@@ -163,6 +199,9 @@ CertificateV2.prototype.getIdentity = function()
  */
 CertificateV2.prototype.getKeyId = function()
 {
+  if (this.getName().size() < CertificateV2.MIN_CERT_NAME_LENGTH)
+    throw new CertificateV2.Error(new Error
+      ("The certificate has an encapsulated X.509 name, not an NDN cert name"));
   return this.getName().get(CertificateV2.KEY_ID_OFFSET);
 };
 
@@ -172,6 +211,9 @@ CertificateV2.prototype.getKeyId = function()
  */
 CertificateV2.prototype.getIssuerId = function()
 {
+  if (this.getName().size() < CertificateV2.MIN_CERT_NAME_LENGTH)
+    throw new CertificateV2.Error(new Error
+      ("The certificate has an encapsulated X.509 name, not an NDN cert name"));
   return this.getName().get(CertificateV2.ISSUER_ID_OFFSET);
 };
 
@@ -182,6 +224,9 @@ CertificateV2.prototype.getIssuerId = function()
  */
 CertificateV2.prototype.getPublicKey = function()
 {
+  if (this.x509Info_ != null)
+    return this.x509Info_.getPublicKey();
+
   if (this.getContent().size() == 0)
     throw new CertificateV2.Error(new Error
       ("The public key is not set (the Data content is empty)"));
@@ -197,6 +242,9 @@ CertificateV2.prototype.getPublicKey = function()
  */
 CertificateV2.prototype.getValidityPeriod = function()
 {
+  if (this.x509Info_ != null)
+    return this.x509Info_.getValidityPeriod();
+
   if (!ValidityPeriod.canGetFromSignature(this.getSignature()))
     throw new InvalidArgumentException(new Error
       ("The SignatureInfo does not have a ValidityPeriod"));
@@ -219,10 +267,72 @@ CertificateV2.prototype.isValid = function(time)
   return this.getValidityPeriod().isValid(time);
 };
 
+/**
+ * Check if this certificate has an issuer name in the signature's key locator.
+ * @return {boolean} True if this has an issue name.
+ */
+CertificateV2.prototype.hasIssuerName = function()
+{
+  if (this.x509Info_ != null)
+    return true;
+
+  return KeyLocator.canGetFromSignature(this.getSignature()) &&
+    KeyLocator.getFromSignature(this.getSignature()).getType() === KeyLocatorType.KEYNAME;
+};
+
+/**
+ * Get the issuer name from the signature's key locator. You should first call
+ * hasIssuerName() to check if it exists.
+ * @return {Name} The issuer name.
+ */
+CertificateV2.prototype.getIssuerName = function()
+{
+  if (this.x509Info_ != null)
+    return this.x509Info_.getIssuerName();
+
+  return KeyLocator.getFromSignature(this.getSignature()).getKeyName();
+};
+
+/**
+ * Get the SignedBlob of the encoding with the offsets for the signed portion.
+ * @param {WireFormat} wireFormat (optional) A WireFormat object used to encode
+ * the Data packet. If omitted, use WireFormat getDefaultWireFormat().
+ * @return {SignedBlob} The SignedBlob of the encoding, or an isNull() Blob if
+ * can't encode.
+ */
+CertificateV2.prototype.getSignedEncoding = function(wireFormat)
+{
+  if (this.x509Info_ != null)
+    return this.x509Info_.getEncoding();
+
+  var signedEncoding = new SignedBlob();
+  try {
+    // This will use a cached encoding if available.
+    signedEncoding = this.wireEncode(wireFormat);
+  } catch (err) {
+    // The signedEncoding isNull().
+  }
+
+  return signedEncoding;
+};
+
+/**
+ * Get the signature value.
+ * @return {Blob} A Blob with the bytes of the signature value..
+ */
+CertificateV2.prototype.getSignatureValue = function()
+{
+  if (this.x509Info_ != null)
+    return this.x509Info_.getSignatureValue();
+
+  return this.getSignature().getSignature();
+};
+
 // TODO: getExtension
 
 /**
  * Override to call the base class wireDecode then check the certificate format.
+ * If the input is an X.509 certificate, then encapsulate it.
  * @param {Blob|Buffer} input The buffer with the bytes to decode.
  * @param {WireFormat} wireFormat (optional) A WireFormat object used to decode
  * this object. If omitted, use WireFormat.getDefaultWireFormat().
@@ -231,7 +341,40 @@ CertificateV2.prototype.wireDecode = function(input, wireFormat)
 {
   wireFormat = (wireFormat || WireFormat.getDefaultWireFormat());
 
+  if (!(input instanceof Blob))
+    input = new Blob(input, true);
+  if (input.size() >= 1 && input.buf()[0] === DerNodeType.Sequence) {
+    // Replace the input with a Data packet that encapsulates the X.509 certificate.
+    // Set the subject name. All other fields are accessed by getIssuerName, etc.
+    var x509Info = new X509CertificateInfo(input);
+    var data = new Data(x509Info.getSubjectName());
+    data.setContent(input);
+    data.getMetaInfo().setType(ContentType.KEY);
+    data.getMetaInfo().setFreshnessPeriod(3600 * 1000.0);
+
+    // Set a digest signature.
+    data.setSignature(new DigestSha256Signature());
+    // Encode once to get the signed portion.
+    var encoding = data.wireEncode(wireFormat);
+    // Compute the SHA-256 here so that we don't depend on KeyChain.
+    var digest = Crypto.createHash('sha256');
+    digest.update(encoding.signedBuf());
+    data.getSignature().setSignature(new Blob(digest.digest(), false));
+
+    input = data.wireEncode(wireFormat);
+    // Proceed below to re-decode from the encapsulated content.
+  }
+
   Data.prototype.wireDecode.call(this, input, wireFormat);
+  if (this.getSignature() instanceof DigestSha256Signature) {
+    // The signature is DigestSha256. Try to decode the content as an X.509 certificate.
+    try {
+      this.x509Info_ = new X509CertificateInfo(this.getContent());
+    } catch (ex) {
+      // The content doesn't seem to be an X.509 certificate. Ignore.
+    }
+  }
+
   this.checkFormat_();
 };
 
@@ -293,6 +436,10 @@ CertificateV2.prototype.toString = function()
  */
 CertificateV2.isValidName = function(certificateName)
 {
+  if (X509CertificateInfo.isEncapsulatedX509(certificateName))
+    // This is an X.509 name from an encapsulated certificate, so don't check it.
+    return true;
+
   // /<NameSpace>/KEY/[KeyId]/[IssuerId]/[Version]
   return (certificateName.size() >= CertificateV2.MIN_CERT_NAME_LENGTH &&
           certificateName.get(CertificateV2.KEY_COMPONENT_OFFSET).equals

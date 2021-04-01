@@ -162,6 +162,7 @@ def build (bld):
                  "js/security/validity-period.js",
                  "js/security/verification-helpers.js",
                  "js/security/certificate/public-key.js",
+                 "js/security/certificate/x509-certificate-info.js",
                  "js/security/certificate/certificate-extension.js",
                  "js/security/certificate/certificate-subject-description.js",
                  "js/security/certificate/certificate.js",

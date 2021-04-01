@@ -504,7 +504,7 @@ Face.prototype.expressInterestHelper = function
     this.transport.send(binaryInterest.buf());
 
     if (this.interestLoopbackEnabled_)
-      dispatchInterest(interest);
+      this.dispatchInterest_(interest);
   }
 };
 
@@ -952,7 +952,7 @@ Face.prototype.putData = function(data, wireFormat)
   wireFormat = (wireFormat || WireFormat.getDefaultWireFormat());
 
   if (this.interestLoopbackEnabled_) {
-    var hasApplicationMatch = this.satisfyPendingInterests(data);
+    var hasApplicationMatch = this.satisfyPendingInterests_(data);
     if (hasApplicationMatch)
       // satisfyPendingInterests called the OnData callback for one of
       // the pending Interests from the application, so we don't need

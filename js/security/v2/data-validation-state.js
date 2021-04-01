@@ -1,4 +1,15 @@
 /**
+ * Copyright (C) 2021 Operant Networks, Incorporated.
+ *
+ * This works is based substantially on previous work as listed below:
+ *
+ * Original file: js/security/v2/data-calidation-state.js
+ * Original repository: https://github.com/named-data/ndn-js
+ *
+ * Summary of Changes: Store data as CertificateV2 if needed.
+ *
+ * which was originally released under the LGPL license with the following rights:
+ *
  * Copyright (C) 2018-2019 Regents of the University of California.
  * @author: Jeff Thompson <jefft0@remap.ucla.edu>
  * @author: From ndn-cxx security https://github.com/named-data/ndn-cxx/blob/master/ndn-cxx/security/v2/validation-state.hpp
@@ -22,6 +33,7 @@
 var SyncPromise = require('../../util/sync-promise.js').SyncPromise; /** @ignore */
 var Data = require('../../data.js').Data; /** @ignore */
 var LOG = require('../../log.js').Log.LOG; /** @ignore */
+var CertificateV2 = require('./certificate-v2.js').CertificateV2; /** @ignore */
 var ValidationError = require('./validation-error.js').ValidationError; /** @ignore */
 var ValidationState = require('./validation-state.js').ValidationState; /** @ignore */
 var VerificationHelpers = require('../verification-helpers.js').VerificationHelpers; /** @ignore */
@@ -48,7 +60,10 @@ var DataValidationState = function DataValidationState
   ValidationState.call(this);
 
   // Make a copy.
-  this.data_ = new Data(data);
+  if (data instanceof CertificateV2)
+    this.data_ = new CertificateV2(data);
+  else
+    this.data_ = new Data(data);
   this.successCallback_ = successCallback;
   this.failureCallback_ = failureCallback;
 
