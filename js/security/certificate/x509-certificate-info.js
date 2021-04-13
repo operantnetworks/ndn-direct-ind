@@ -110,7 +110,7 @@ var X509CertificateInfo = function X509CertificateInfo
       if (tbsChildren.length < 6 + versionOffset)
         throw new Error("X509CertificateInfo: Expected 6 TBSCertificate fields");
 
-      this.issuerName_ = X509CertificateInfo.makeName(tbsChildren[2 + versionOffset]);
+      this.issuerName_ = X509CertificateInfo.makeName(tbsChildren[2 + versionOffset], null);
 
       // validity
       var validityChildren = DerNode.getSequence
@@ -122,7 +122,16 @@ var X509CertificateInfo = function X509CertificateInfo
         throw new Error("X509CertificateInfo: Cannot decode Validity");
       this.validityPeriod_ = new ValidityPeriod(notBefore.toVal(), notAfter.toVal());
 
-      this.subjectName_ = X509CertificateInfo.makeName(tbsChildren[4 + versionOffset]);
+      // Get the extensions.
+      var extensions = null;
+      var extensionsExplicit = tbsChildren[tbsChildren.length - 1];
+      if (extensionsExplicit instanceof DerNode.DerExplicit &&
+          extensionsExplicit.getTag() == 3 &&
+          extensionsExplicit.getChildren().length == 1)
+        extensions = extensionsExplicit.getChildren()[0];
+
+      this.subjectName_ = X509CertificateInfo.makeName
+        (tbsChildren[4 + versionOffset], extensions);
 
       this.publicKey_ = tbsChildren[5 + versionOffset].encode();
     } catch (ex) {
@@ -136,6 +145,10 @@ var X509CertificateInfo = function X509CertificateInfo
     this.publicKey_ = publicKey;
     this.signatureValue_ = signatureValue;
 
+    // We are using certificate extensions, so we must set the version.
+    var version = new DerNode.DerExplicit(0);
+    version.addChild(new DerNode.DerInteger(2));
+
     var algorithmIdentifier =new DerNode.DerSequence();
     algorithmIdentifier.addChild(new DerNode.DerOid
       (X509CertificateInfo.RSA_ENCRYPTION_OID));
@@ -143,6 +156,7 @@ var X509CertificateInfo = function X509CertificateInfo
 
     var tbsCertificate = new DerNode.DerSequence();
     //TBSCertificate  ::=  SEQUENCE  {
+    //      version         [0]  EXPLICIT Version DEFAULT v1,
     //      serialNumber         CertificateSerialNumber,
     //      signature            AlgorithmIdentifier,
     //      issuer               Name,
@@ -150,21 +164,30 @@ var X509CertificateInfo = function X509CertificateInfo
     //      subject              Name,
     //      subjectPublicKeyInfo SubjectPublicKeyInfo
     //      }
+    tbsCertificate.addChild(version);
     tbsCertificate.addChild(new DerNode.DerInteger(0));
     tbsCertificate.addChild(algorithmIdentifier);
-    tbsCertificate.addChild(X509CertificateInfo.makeX509Name(issuerName));
+    tbsCertificate.addChild(X509CertificateInfo.makeX509Name(issuerName, null));
 
     var validity = new DerNode.DerSequence();
     validity.addChild(new DerNode.DerUtcTime(validityPeriod.getNotBefore()));
     validity.addChild(new DerNode.DerUtcTime(validityPeriod.getNotAfter()));
     tbsCertificate.addChild(validity);
 
-    tbsCertificate.addChild(X509CertificateInfo.makeX509Name(subjectName));
+    var extensions = new DerNode.DerSequence();
+    tbsCertificate.addChild(X509CertificateInfo.makeX509Name(subjectName, extensions));
 
     try {
       tbsCertificate.addChild(DerNode.parse(publicKey));
     } catch (ex) {
       throw new Error("X509CertificateInfo: publicKey encoding is invalid DER: " + ex);
+    }
+
+    if (extensions.getChildren().length > 0) {
+      // makeX509Name added to extensions, so include it.
+      var extensionsExplicit = new DerNode.DerExplicit(3);
+      extensionsExplicit.addChild(extensions);
+      tbsCertificate.addChild(extensionsExplicit);
     }
 
     // Certificate  ::=  SEQUENCE  {
@@ -251,61 +274,135 @@ X509CertificateInfo.isEncapsulatedX509 = function(name)
 };
 
 /**
- * Convert an X.509 name to an NDN Name. This should be the reverse operation
- * of makeX509Name().
- * @param {DerNode} x509Name The DerNode of the X.509 name.
+ * Make an NDN Name from the URI field in the Subject Alternative Names
+ * extension, if available. Otherwise make an NDN name that encapsulates the
+ * X.509 name, where the first component is "x509" and the second is the
+ * encoded X.509 name. This should be the reverse operation of makeX509Name().
+ * @param {DerNode} x509Name The DerNode of the X.509 name, used if extensions
+ * is null or doesn't have a URI field in the Subject Alternative Names.
+ * @param {DerNode} extensions The DerNode of the extensions (the only child of
+ * the DerExplicit node with tag 3). If this is null, don't use it.
  * @return {Name} The NDN Name.
  */
-X509CertificateInfo.makeName = function(x509Name)
+X509CertificateInfo.makeName = function(x509Name, extensions)
 {
-  // Check if there is a UTF8 string with the OID for "pseudonym".
-  var components = x509Name.getChildren();
-  for (var i = 0; i < components.length; ++i) {
-    var component = components[i];
-    if (!(component instanceof DerNode.DerSet))
-      // Not a valid X.509 name. Don't worry about it and continue below to use the encoding.
-      break;
-    var componentChildren = component.getChildren();
-    if (componentChildren.length !== 1)
-      break;
-    var typeAndValue = componentChildren[0];
-    if (!(typeAndValue instanceof DerNode.DerSequence))
-      break;
-    var typeAndValueChildren = typeAndValue.getChildren();
-    if (typeAndValueChildren.length !== 2)
-      break;
+  if (extensions != null) {
+    // Try to get the URI field in the Subject Alternative Names.
 
-    var oid = typeAndValueChildren[0];
-    var value = typeAndValueChildren[1];
+    //Extensions  ::=  SEQUENCE SIZE (1..MAX) OF Extension
+    //
+    // Extension  ::=  SEQUENCE  {
+    //    extnID      OBJECT IDENTIFIER,
+    //    critical    BOOLEAN DEFAULT FALSE,
+    //    extnValue   OCTET STRING
+    //                -- contains the DER encoding of an ASN.1 value
+    //                -- corresponding to the extension type identified
+    //                -- by extnID
+    //    }
+    //
+    // subjectAltName EXTENSION ::= {
+    // 	SYNTAX GeneralNames
+    // 	IDENTIFIED BY id-ce-subjectAltName
+    // }
+    //
+    // GeneralNames ::= SEQUENCE SIZE (1..MAX) OF GeneralName
+    //
+    // GeneralName ::= CHOICE {
+    // 	otherName	[0] INSTANCE OF OTHER-NAME,
+    // 	rfc822Name	[1] IA5String,
+    // 	dNSName		[2] IA5String,
+    // 	x400Address	[3] ORAddress,
+    // 	directoryName	[4] Name,
+    // 	ediPartyName	[5] EDIPartyName,
+    // 	uniformResourceIdentifier [6] IA5String,
+    // 	IPAddress	[7] OCTET STRING,
+    // 	registeredID	[8] OBJECT IDENTIFIER
+    var extensionsChildren = extensions.getChildren();
 
-    if ((oid instanceof DerNode.DerOid) && (value instanceof DerNode.DerUtf8String) &&
-        oid.toVal() == X509CertificateInfo.PSEUDONYM_OID)
-      return new Name(value.toVal().toString());
+    for (var i = 0; i < extensionsChildren.length; ++i) {
+      var extension = extensionsChildren[i];
+      if (!(extension instanceof DerNode.DerSequence))
+        // We don't expect this.
+        continue;
+      var extensionChildren = extension.getChildren();
+
+      if (extensionChildren.length < 2 || extensionChildren.length > 3)
+        // We don't expect this.
+        continue;
+      var oid = extensionChildren[0];
+      // Ignore "critical".
+      var extensionValue = extensionChildren[extensionChildren.length - 1];
+      if (!(oid instanceof DerNode.DerOid) ||
+          !(extensionValue instanceof DerNode.DerOctetString))
+        // We don't expect this.
+        continue;
+      if (oid.toVal() != X509CertificateInfo.SUBJECT_ALTERNATIVE_NAME_OID)
+        // Try the next extension.
+        continue;
+
+      try {
+        var generalNames = DerNode.parse(extensionValue.toVal());
+        var generalNamesChildren = generalNames.getChildren();
+        for (var i = 0; i < generalNamesChildren.length; ++i) {
+          var value = generalNamesChildren[i];
+          if (!(value instanceof DerNode.DerImplicitByteString))
+            // We don't expect this.
+            continue;
+
+          if (value.getType() == X509CertificateInfo.SUBJECT_ALTERNATIVE_NAME_URI_TYPE)
+            // Return an NDN name made from the URI.
+            return new Name(value.toVal().toString());
+        }
+      } catch (ex) {
+        // We don't expect this.
+        continue;
+      }
+    }
   }
 
+  // Default behavior: Encapsulate the X.509 name.
   return new Name().append(X509CertificateInfo.X509_COMPONENT).append(x509Name.encode());
 };
 
 /**
- * If the Name has two components and the first is "x509", then return the
- * DerNode of the second component. Otherwise, return the DerNode of an
- * X.509 name with one component where the type is "pseudonym" and the value
- * is a UTF8 string with the name URI. This should be the reverse operation
- * of makeName().
+ * If the Name has two components and the first is "x509" (see
+ * isEncapsulatedX509), then return a DerNode made from the second component.
+ * Otherwise, return a DerNode which is a short representation of the Name,
+ * and update the extensions by adding a Subject Alternative Names extension
+ * with a URI field for the NDN Name. This should be the reverse operation of
+ * makeName().
  * @param {Name} name The NDN name.
+ * @param {DerNode} extensions The DerNode of the extensions (the only child of
+ * the DerExplicit node with tag 3). If the NDN Name is not an encapsulated
+ * X.509 name, then add the Subject Alternative Names extensions (without first
+ * checking if extensions already has one). If this is null, don't use it.
  * @return {DerNode} A DerNode of the X.509 name.
  */
-X509CertificateInfo.makeX509Name = function(name)
+X509CertificateInfo.makeX509Name = function(name, extensions)
 {
   if (X509CertificateInfo.isEncapsulatedX509(name))
     // Just decode the second component.
     return DerNode.parse(name.get(1).getValue());
 
+  var uri = name.toUri();
+  if (extensions instanceof DerNode.DerSequence) {
+    // Add the Subject Alternative Names without checking if one already exists.
+    var generalNames = new DerNode.DerSequence();
+    generalNames.addChild(new DerNode.DerImplicitByteString
+      (new Blob(uri).buf(), X509CertificateInfo.SUBJECT_ALTERNATIVE_NAME_URI_TYPE));
+    var generalNamesEncoding = generalNames.encode();
+
+    var extension = new DerNode.DerSequence();
+    extension.addChild(new DerNode.DerOid
+      (new OID(X509CertificateInfo.SUBJECT_ALTERNATIVE_NAME_OID)));
+    extension.addChild(new DerNode.DerOctetString(generalNamesEncoding.buf()));
+    extensions.addChild(extension);
+  }
+
   // Make an X.509 name with a "pseudonym.
   var root = new DerNode.DerSequence();
   var typeAndValue = new DerNode.DerSequence();
   typeAndValue.addChild(new DerNode.DerOid(new OID(X509CertificateInfo.PSEUDONYM_OID)));
-  var uri = name.toUri();
   typeAndValue.addChild(new DerNode.DerUtf8String(new Blob(uri).buf()));
   var component = new DerNode.DerSet();
   component.addChild(typeAndValue);
@@ -316,4 +413,6 @@ X509CertificateInfo.makeX509Name = function(name)
 
 X509CertificateInfo.RSA_ENCRYPTION_OID = "1.2.840.113549.1.1.1";
 X509CertificateInfo.PSEUDONYM_OID = "2.5.4.65";
+X509CertificateInfo.SUBJECT_ALTERNATIVE_NAME_OID = "2.5.29.17";
+X509CertificateInfo.SUBJECT_ALTERNATIVE_NAME_URI_TYPE = 0x86;
 X509CertificateInfo.X509_COMPONENT = new Name.Component("x509");
