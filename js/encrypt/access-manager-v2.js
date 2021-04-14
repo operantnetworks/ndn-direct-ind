@@ -552,7 +552,7 @@ AccessManagerV2.prototype.publishGckLatestData_ = function(face)
     return SyncPromise.resolve();
   })
   .catch(function(err) {
-    if (LOG > 0) console.log("Error signing GCK _latest Data packet: " + err);
+    console.log("Error signing GCK _latest Data packet: " + err);
   });
 };
 
