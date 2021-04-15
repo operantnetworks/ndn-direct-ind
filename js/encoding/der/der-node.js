@@ -254,6 +254,8 @@ DerNode.parse = function(inputBuf, startIdx)
     newNode = new DerNode.DerGeneralizedTime();
   else if (DerNode.DerStructure.isExplicitNode(nodeType))
     newNode = new DerNode.DerExplicit(nodeType & 0x1f);
+  else if (DerNode.DerImplicitByteString.isImplicit(nodeType))
+    newNode = new DerNode.DerImplicitByteString(null, nodeType);
   else
     throw new DerDecodingException(new Error("Unimplemented DER type " + nodeType));
 
@@ -1016,3 +1018,41 @@ DerNode.DerExplicit.prototype.getTag = function()
 {
   return this.nodeType_ & 0x1f;
 };
+
+/**
+ * DerImplicitByteString extends DerByteString to encode a string of bytes using
+ * an IMPLICIT node type.
+ * Create a DerImplicitByteString with the input value.
+ * @param {Buffer} inputData An input buffer containing the bytes to encode.
+ * @param {number} type The value of the DER type, for example 0x81 . It is an
+ * error if bit 6 is set (meaning a structured type) or if bits 7 and 8 are zero
+ * (not an implicit tag).
+ */
+DerNode.DerImplicitByteString = function DerImplicitByteString(inputData, type)
+{
+  // Call the base constructor.
+  DerNode.DerByteString.call(this, inputData, type);
+
+  if (!DerNode.DerImplicitByteString.isImplicit(type))
+    throw new Error
+      ("DerImplicitByteString: The type is not for a non-structured IMPLICIT value");
+};
+DerNode.DerImplicitByteString.prototype = new DerNode.DerByteString();
+DerNode.DerImplicitByteString.prototype.name = "DerImplicitByteString";
+
+/**
+ * Get the value of the DER type.
+ * @return {number} The value of the DER type, for example 0x81.
+ */
+DerNode.DerImplicitByteString.prototype.getType = function() { return this.nodeType_; }
+
+/**
+ * Check if the type code is for a non-structured IMPLICIT value.
+ * @param {number} type The type code.
+ * @return {boolean} True if for non-structured IMPLICIT value.
+ */
+DerNode.DerImplicitByteString.isImplicit  = function(type)
+{
+  return (type & 0x20) === 0 && (type & 0xc0) !== 0;
+};
+
