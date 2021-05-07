@@ -658,7 +658,7 @@ EncryptorV2.prototype.fetchGck_ = function(gckName, onError, nTriesLeft)
       thisEncryptor.gckPendingInterestId_ = 0;
 
       // Leave isGckRetrievalInProgress_ true.
-      thisEncryptor.decryptGckAndProcessPendingDecrypts_(gckName, ckData, onError);
+      thisEncryptor.decryptGckAndProcessPendingEncrypts_(gckName, ckData, onError);
     } catch (ex) {
       onError(EncryptError.ErrorCode.General,
         "Error in EncryptorV2::fetchGck onData: " + ex);
@@ -695,14 +695,14 @@ EncryptorV2.prototype.fetchGck_ = function(gckName, onError, nTriesLeft)
 
 /**
  * Decrypt the gckData fetched by fetchGck(), then copy it to ckBits_ and
- * copy gckName to ckName_ . Then process pending decrypts.
+ * copy gckName to ckName_ . Then process pending encrypts.
  * @param {Name} gckName The Name that fetchGck() used to fetch.
  * @param {Data} gckData The GCK Data packet fetched by fetchGck_().
  * @param {function} onError On failure, this calls onError(errorCode, message)
  * where errorCode is from EncryptError.ErrorCode, and message is an error
  * string.
  */
-EncryptorV2.prototype.decryptGckAndProcessPendingDecrypts_ = function
+EncryptorV2.prototype.decryptGckAndProcessPendingEncrypts_ = function
   (gckName, gckData, onError)
 {
   // This is only called from fetchGck_, so isGckRetrievalInProgress_ is true.
