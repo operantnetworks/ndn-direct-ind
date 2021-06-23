@@ -1,6 +1,6 @@
 /**
  * Copyright (C) 2017-2019 Regents of the University of California.
- * @author: Jeff Thompson <jefft0@remap.ucla.edu>
+ * @author: Jeff Thompson
  * @author: From https://github.com/named-data/ndn-cxx/blob/master/ndn-cxx/security/transform/private-key.cpp
  *
  * This program is free software: you can redistribute it and/or modify
@@ -33,12 +33,6 @@ var DerInteger = require('../../encoding/der/der-node.js').DerNode.DerInteger; /
 var OID = require('../../encoding/oid.js').OID; /** @ignore */
 var Blob = require('../../util/blob.js').Blob; /** @ignore */
 var UseSubtleCrypto = require('../../use-subtle-crypto-node.js').UseSubtleCrypto; /** @ignore */
-var RsaKeypair = null;
-try {
-  // This should be installed with: sudo npm install rsa-keypair
-  RsaKeypair = require('rsa-keypair');
-}
-catch (e) {}
 
 /**
  * A TpmPrivateKey holds an in-memory private key and provides cryptographic
@@ -702,12 +696,15 @@ TpmPrivateKey.generatePrivateKeyPromise = function(keyParams, useSync)
     var privateKeyPem;
 
     if (keyParams.getKeyType() === KeyType.RSA) {
-      if (!RsaKeypair)
+      if (!Crypto.generateKeyPairSync)
         return SyncPromise.reject(new TpmPrivateKey.Error(new Error
-          ("Need to install rsa-keypair: sudo npm install rsa-keypair")));
+          ("To generate a key pair, need Node.js v10.12.0 or greater")));
 
-      var keyPair = RsaKeypair.generate(keyParams.getKeySize());
-      privateKeyPem = keyPair.privateKey.toString();
+      var keyPair = Crypto.generateKeyPairSync
+        ('rsa', { modulusLength: keyParams.getKeySize(),
+                  publicKeyEncoding: {type: 'pkcs1', format: 'pem' },
+                  privateKeyEncoding: {type: 'pkcs1', format: 'pem' } });
+      privateKeyPem = keyPair.privateKey;
     }
     else
       return SyncPromise.reject(new Error
