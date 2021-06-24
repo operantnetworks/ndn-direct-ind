@@ -328,6 +328,19 @@ CertificateV2.prototype.getSignatureValue = function()
   return this.getSignature().getSignature();
 };
 
+/**
+ * Get the CRL distribution URI from the X509CertificateInfo.
+ * @return {String} The CRL distribution URI, or "" if not found or it there is
+ * no X509CertificateInfo.
+ */
+CertificateV2.prototype.getCrlDistributionUri = function()
+{
+  if (this.x509Info_ != null)
+    return this.x509Info_.getCrlDistributionUri();
+
+  return "";
+};
+
 // TODO: getExtension
 
 /**

@@ -134,6 +134,8 @@ var X509CertificateInfo = function X509CertificateInfo
         (tbsChildren[4 + versionOffset], extensions);
 
       this.publicKey_ = tbsChildren[5 + versionOffset].encode();
+
+      this.crlDistributionUri_ = X509CertificateInfo.findCrlDistributionUri(extensions);
     } catch (ex) {
       throw new Error("X509CertificateInfo: Cannot decode the TBSCertificate: " + ex);
     }
@@ -144,6 +146,7 @@ var X509CertificateInfo = function X509CertificateInfo
     this.subjectName_ = new Name(subjectName);
     this.publicKey_ = publicKey;
     this.signatureValue_ = signatureValue;
+    this.crlDistributionUri_ = "";
 
     // We are using certificate extensions, so we must set the version.
     var version = new DerNode.DerExplicit(0);
@@ -263,6 +266,16 @@ X509CertificateInfo.prototype.getSignatureValue = function()
 };
 
 /**
+ * In the extensions find the X509v3 CRL Distribution Points extension and get
+ * the first fullname URI.
+ * @return {String} The CRL distribution URI, or "" if not found.
+ */
+X509CertificateInfo.prototype.getCrlDistributionUri = function()
+{
+  return this.crlDistributionUri_;
+};
+
+/**
  * Check if the Name has two components and the first component is "x509". The
  * second component should be the encoding of the X.509 name.
  * @param {Name} name The Name to check.
@@ -349,7 +362,7 @@ X509CertificateInfo.makeName = function(x509Name, extensions)
             // We don't expect this.
             continue;
 
-          if (value.getType() == X509CertificateInfo.SUBJECT_ALTERNATIVE_NAME_URI_TYPE)
+          if (value.getType() == X509CertificateInfo.GENERAL_NAME_URI_TYPE)
             // Return an NDN name made from the URI.
             return new Name(value.toVal().toString());
         }
@@ -389,7 +402,7 @@ X509CertificateInfo.makeX509Name = function(name, extensions)
     // Add the Subject Alternative Names without checking if one already exists.
     var generalNames = new DerNode.DerSequence();
     generalNames.addChild(new DerNode.DerImplicitByteString
-      (new Blob(uri).buf(), X509CertificateInfo.SUBJECT_ALTERNATIVE_NAME_URI_TYPE));
+      (new Blob(uri).buf(), X509CertificateInfo.GENERAL_NAME_URI_TYPE));
     var generalNamesEncoding = generalNames.encode();
 
     var extension = new DerNode.DerSequence();
@@ -411,8 +424,94 @@ X509CertificateInfo.makeX509Name = function(name, extensions)
   return root;
 };
 
+/**
+ * In the extensions, find the X509v3 CRL Distribution Points extension and
+ * get the first fullname URI.
+ * @param {DerNode} extensions The DerNode of the extensions (the only child of the
+ * DerExplicit node with tag 3). If this is null, don't use it and return "".
+ * @return {String} The first fullname URI in the distributionPoint, or "" if
+ * not found.
+ */
+X509CertificateInfo.findCrlDistributionUri = function(extensions)
+{
+  if (extensions == null)
+    return "";
+
+  // See makeName() for the definition of Extensions and GeneralNames.
+  //
+  // CRLDistPointSyntax ::= SEQUENCE SIZE (1..MAX) OF DistributionPoint
+  //
+  // DistributionPoint ::= SEQUENCE {
+  //   distributionPoint [0] DistributionPointName OPTIONAL,
+  //   reasons      [1] ReasonFlags OPTIONAL,
+  //   cRLIssuer    [2] GeneralNames OPTIONAL
+  // }
+  //
+  // DistributionPointName ::= CHOICE {
+  //   fullname  [0] GeneralNames,
+  //   nameRelativeToCRLIssuer [1] RelativeDistinguishedName
+  // }
+  var extensionsChildren = extensions.getChildren();
+
+  for (var iExtension = 0; iExtension < extensionsChildren.length; ++iExtension) {
+    var extension = extensionsChildren[iExtension];
+    if (!(extension instanceof DerNode.DerSequence))
+      // We don't expect this.
+      continue;
+    var extensionChildren = extension.getChildren();
+
+    if (extensionChildren.length < 2 || extensionChildren.length > 3)
+      // We don't expect this.
+      continue;
+    var oid = extensionChildren[0];
+    // Ignore "critical".
+    var extensionValue = extensionChildren[extensionChildren.length - 1];
+    if (!(oid instanceof DerNode.DerOid) ||
+        !(extensionValue instanceof DerNode.DerOctetString))
+      // We don't expect this.
+      continue;
+    if (oid.toVal() != X509CertificateInfo.CRL_DISTRIBUTION_POINTS_OID)
+      // Try the next extension.
+      continue;
+
+    try {
+      var distributionPointList = DerNode.parse(extensionValue.toVal());
+      var distributionPointListChildren = distributionPointList.getChildren();
+      for (var i = 0; i < distributionPointListChildren.length; ++i) {
+        var distributionPointChildren = distributionPointListChildren[i].getChildren();
+
+        for (var j = 0; j < distributionPointChildren.length; ++j) {
+          // Get distributionPoint [0] DistributionPointName.
+          var distributionNameExplicit = distributionPointChildren[j];
+          if (distributionNameExplicit instanceof DerNode.DerExplicit &&
+              distributionNameExplicit.getTag() === 0 &&
+              distributionNameExplicit.getChildren().length === 1) {
+            // Get fullname [0] GeneralNames.
+            var fullNameExplicit = distributionNameExplicit.getChildren()[0];
+            if (fullNameExplicit instanceof DerNode.DerExplicit &&
+                fullNameExplicit.getTag() === 0 &&
+                fullNameExplicit.getChildren().length === 1) {
+              // Get an implicit GeneralName URI.
+              var value = fullNameExplicit.getChildren()[0];
+              if (value instanceof DerNode.DerImplicitByteString &&
+                  value.getType() === X509CertificateInfo.GENERAL_NAME_URI_TYPE)
+                return value.toVal().toString();
+            }
+          }
+        }
+      }
+    } catch (ex) {
+      // We don't expect this.
+      continue;
+    }
+  }
+
+  return "";
+};
+
 X509CertificateInfo.RSA_ENCRYPTION_OID = "1.2.840.113549.1.1.1";
 X509CertificateInfo.PSEUDONYM_OID = "2.5.4.65";
 X509CertificateInfo.SUBJECT_ALTERNATIVE_NAME_OID = "2.5.29.17";
-X509CertificateInfo.SUBJECT_ALTERNATIVE_NAME_URI_TYPE = 0x86;
+X509CertificateInfo.CRL_DISTRIBUTION_POINTS_OID = "2.5.29.31";
+X509CertificateInfo.GENERAL_NAME_URI_TYPE = 0x86;
 X509CertificateInfo.X509_COMPONENT = new Name.Component("x509");
