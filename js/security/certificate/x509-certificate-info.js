@@ -110,6 +110,7 @@ var X509CertificateInfo = function X509CertificateInfo
       if (tbsChildren.length < 6 + versionOffset)
         throw new Error("X509CertificateInfo: Expected 6 TBSCertificate fields");
 
+      this.serialNumber_ = tbsChildren[0 + versionOffset].getPayload();
       this.issuerName_ = X509CertificateInfo.makeName(tbsChildren[2 + versionOffset], null);
 
       // validity
@@ -141,6 +142,7 @@ var X509CertificateInfo = function X509CertificateInfo
     }
   }
   else {
+    this.serialNumber_ = Blob();
     this.issuerName_ = new Name(issuerName);
     this.validityPeriod_ = new ValidityPeriod(validityPeriod);
     this.subjectName_ = new Name(subjectName);
@@ -218,6 +220,15 @@ exports.X509CertificateInfo = X509CertificateInfo;
 X509CertificateInfo.prototype.getEncoding = function()
 {
   return this.signedEncoding_;
+};
+
+/**
+ * Get the serial number.
+ * @return {Blob} The serial number as a Blob with the bytes of the integer.
+ */
+X509CertificateInfo.prototype.getSerialNumber = function()
+{
+  return this.serialNumber_;
 };
 
 /**
