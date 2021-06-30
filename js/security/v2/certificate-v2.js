@@ -328,6 +328,32 @@ CertificateV2.prototype.getSignatureValue = function()
   return this.getSignature().getSignature();
 };
 
+/**
+ * Get the X.509 serial number from the X509CertificateInfo.
+ * @return {Blob} The X.509 serial number as a Blob with the bytes of the integer,
+ * or an isNull() Blob if there is no X509CertificateInfo.
+ */
+CertificateV2.prototype.getX509SerialNumber = function()
+{
+  if (this.x509Info_ != null)
+    return this.x509Info_.getSerialNumber();
+
+  return new Blob();
+};
+
+/**
+ * Get the CRL distribution URI from the X509CertificateInfo.
+ * @return {String} The CRL distribution URI, or "" if not found or it there is
+ * no X509CertificateInfo.
+ */
+CertificateV2.prototype.getCrlDistributionUri = function()
+{
+  if (this.x509Info_ != null)
+    return this.x509Info_.getCrlDistributionUri();
+
+  return "";
+};
+
 // TODO: getExtension
 
 /**
