@@ -64,6 +64,7 @@ exports.CertificateSubjectDescription = require('./js/security/certificate/certi
 exports.Certificate = require('./js/security/certificate/certificate.js').Certificate;
 exports.PublicKey = require('./js/security/certificate/public-key.js').PublicKey;
 exports.X509CertificateInfo = require('./js/security/certificate/x509-certificate-info.js').X509CertificateInfo;
+exports.X509CrlInfo = require('./js/security/certificate/x509-crl-info.js').X509CrlInfo;
 exports.Pib = require('./js/security/pib/pib.js').Pib;
 exports.PibKey = require('./js/security/pib/pib-key.js').PibKey;
 exports.PibImpl = require('./js/security/pib/pib-impl.js').PibImpl;
