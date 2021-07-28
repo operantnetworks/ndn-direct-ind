@@ -1,4 +1,4 @@
-NDN-DIRECT-IND (2020-11-13)
+NDN-DIRECT-IND (2021-07-23)
 ---------------------------
 
 Changes
@@ -12,3 +12,5 @@ Changes
 * In KeyChain, remove obsolete security v1 API.
 * Remove support for obsolete AES-128-ECB and AES-256-ECB.
 * In TpmPrivateKey: Make the encryption algorithm a member variable.
+* Support X509 certificate format and validation https://github.com/operantnetworks/ndn-direct-ind/pull/22
+* Support X509 CRL format https://github.com/operantnetworks/ndn-direct-ind/pull/24
