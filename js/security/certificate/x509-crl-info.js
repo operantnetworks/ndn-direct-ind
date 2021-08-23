@@ -29,12 +29,35 @@ var DerNode = require('../../encoding/der/der-node.js').DerNode;
  *
  * There are two forms of the constructor:
  * X509CrlInfo(encoding) - Create an X509CrlInfo by decoding an X.509 CRL.
+ * X509CrlInfo(crlInfo) - Create an X509CrlInfo, copying values from the other object.
  * @param {Blob} encoding The encoded X.509 CRL.
+ * @param {X509CrlInfo} crlInfo The other X509CrlInfo to copy from.
  * @throws Error for error decoding the CRL.
  * @constructor
  */
 var X509CrlInfo = function X509CrlInfo(encoding)
 {
+  if (typeof encoding === 'object' && encoding instanceof X509CrlInfo) {
+    // The copy constructor.
+    crlInfo = encoding;
+
+    this.root_ = crlInfo.root_;
+    this.signatureValue_ = crlInfo.signatureValue_;
+    this.signedEncoding_ = crlInfo.signedEncoding_;
+    this.issuerName_ = new Name(crlInfo.issuerName_);
+    this.thisUpdate_ = crlInfo.thisUpdate_;
+    this.nextUpdate_ = crlInfo.nextUpdate_;
+    // Copy the RevokedCertificate entries.
+    this.revokedCertificates_ = [];
+    for (var i = 0; i < crlInfo.revokedCertificates_.length; ++i)
+      this.revokedCertificates_.push
+        (new X509CrlInfo.RevokedCertificate
+         (crlInfo.revokedCertificates_[i].serialNumber_,
+          crlInfo.revokedCertificates_[i].revocationDate_));
+
+    return;
+  }
+
   // See https://tools.ietf.org/html/rfc5280 .
   // CertificateList  ::=  SEQUENCE  {
   //       tbsCertList          TBSCertList,
