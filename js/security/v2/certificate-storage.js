@@ -1,4 +1,15 @@
 /**
+ * Copyright (C) 2021 Operant Networks, Incorporated.
+ *
+ * This works is based substantially on previous work as listed below:
+ *
+ * Original file: js/security/v2/certificate-storage.js
+ * Original repository: https://github.com/named-data/ndn-js
+ *
+ * Summary of Changes: Check CRL.
+ *
+ * which was originally released under the LGPL license with the following rights:
+ *
  * Copyright (C) 2018-2019 Regents of the University of California.
  * @author: Jeff Thompson <jefft0@remap.ucla.edu>
  * @author: From ndn-cxx security https://github.com/named-data/ndn-cxx/blob/master/ndn-cxx/security/v2/certificate-storage.hpp
@@ -22,6 +33,9 @@
 var Name = require('../../name.js').Name; /** @ignore */
 var TrustAnchorContainer = require('./trust-anchor-container.js').TrustAnchorContainer; /** @ignore */
 var CertificateV2 = require('./certificate-v2.js').CertificateV2; /** @ignore */
+var X509CrlCache = require('./x509-crl-cache.js').X509CrlCache; /** @ignore */
+var WireFormat = require('../../encoding/wire-format.js').WireFormat; /** @ignore */
+var LOG = require('../../log.js').Log.LOG; /** @ignore */
 var CertificateCacheV2 = require('./certificate-cache-v2.js').CertificateCacheV2;
 
 /**
@@ -35,6 +49,7 @@ var CertificateStorage = function CertificateStorage()
   this.trustAnchors_ = new TrustAnchorContainer();
   this.verifiedCertificateCache_ = new CertificateCacheV2(3600 * 1000.0);
   this.unverifiedCertificateCache_ = new CertificateCacheV2(300 * 1000.0);
+  this.verifiedCrlCache_ = new X509CrlCache();
 };
 
 exports.CertificateStorage = CertificateStorage;
@@ -138,12 +153,67 @@ CertificateStorage.prototype.resetAnchors = function()
 };
 
 /**
- * Cache the verified certificate a period of time (1 hour).
+ * Check if the CRL revoked the certificate and if not then
+ * cache the verified certificate a period of time (1 hour).
  * @param {CertificateV2} certificate The certificate object, which is copied.
+ * @return {boolean} True for success, false if the CRL from the issuer has
+ * revoked this certificate (in which case there is a log message).
  */
 CertificateStorage.prototype.cacheVerifiedCertificate = function(certificate)
 {
+  var revoked = this.findRevokedCertificate
+    (certificate.getIssuerName(), certificate.getX509SerialNumber());
+  if (revoked != null) {
+    if (LOG > 1) console.log("REVOKED: The CRL from issuer " +
+      certificate.getIssuerName().toUri() + " has revoked serial number " +
+      revoked.getSerialNumber().toHex() + " at time " +
+      WireFormat.toIsoString(revoked.getRevocationDate()) +
+      ". Rejecting fetched certificate " + certificate.getName().toUri());
+    return false;
+  }
+
   this.verifiedCertificateCache_.insert(certificate);
+  return true;
+};
+
+/**
+ * Cache the verified CRL in the X509CrlCache, and evict certificates from the
+ * verified certificate cache which have the same issuer as the CRL and which
+ * have a serial number in the revocation list. The cached CRL will be used to
+ * check if a new certificate is revoked before adding the the verified
+ * certificate cache.
+ * @param crlInfo {X509CrlInfo} The X509CrlInfo object, which is copied.
+ */
+CertificateStorage.prototype.cacheVerifiedCrl = function(crlInfo)
+{
+  if (!this.verifiedCrlCache_.insert(crlInfo))
+    // The error has been logged, such as expired CRL.
+    return;
+
+  // Remove revoked certificates from verifiedCertificateCache_ .
+  var certificates = this.verifiedCertificateCache_.certificatesByName_;
+  for (var i = 0; i < certificates.length; ) {
+    var entry = certificates[i];
+
+    if (!entry.certificate.getIssuerName().equals(crlInfo.getIssuerName())) {
+      // The certificate is not from the same issuer as the CRL.
+      ++i;
+      continue;
+    }
+
+    var revoked = this.findRevokedCertificate
+      (entry.certificate.getIssuerName(), entry.certificate.getX509SerialNumber());
+    if (revoked != null) {
+      if (LOG > 1) console.log("REVOKED: The newly-fetched CRL with thisUpdate time " +
+        WireFormat.toIsoString(crlInfo.getThisUpdate()) +
+        " has revoked serial number " + revoked.getSerialNumber().toHex() +
+        " at time " + WireFormat.toIsoString(revoked.getRevocationDate()) +
+        ". Removing certificate " + entry.certificategetName().toUri());
+      certificates.splice(i, 1);
+    }
+    else
+      ++i;
+  }
 };
 
 /**
@@ -165,3 +235,33 @@ CertificateStorage.prototype.setCacheNowOffsetMilliseconds_ = function
   this.verifiedCertificateCache_.setNowOffsetMilliseconds_(nowOffsetMilliseconds);
   this.unverifiedCertificateCache_.setNowOffsetMilliseconds_(nowOffsetMilliseconds);
 };
+
+/**
+ * Find the first entry in the CRL for issuerName where the entry's serial
+ * number matches the given serial number.
+ * @param {Name} issuerName The NDN issuer name for finding the CRL.
+ * @param {Blob} serialNumber The serial number to match as a Blob with the
+ * bytes of the integer. If serialNumber.size() == 0, this does not match it.
+ * @return {X509CrlInfo.RevokedCertificate} The matching RevokedCertificate
+ * entry from the issuer's CRL, or null if not found.
+ */
+CertificateStorage.prototype.findRevokedCertificate = function
+  (issuerName, serialNumber)
+{
+  if (serialNumber.size() == 0)
+    // This can happen by calling getX509SerialNumber() on a non-X.509 certificate.
+    return null;
+
+  var crlInfo = this.verifiedCrlCache_.find(issuerName);
+  if (crlInfo == null)
+    return null;
+
+  for (var i = 0; i < crlInfo.getRevokedCertificateCount(); ++i) {
+    var entry = crlInfo.getRevokedCertificate(i);
+    if (entry.getSerialNumber().equals(serialNumber))
+      return entry;
+  }
+
+  return null;
+};
+
