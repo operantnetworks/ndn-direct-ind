@@ -128,6 +128,7 @@ Validator.prototype.getMaxDepth = function() { return this.maxDepth_; };
  * Asynchronously validate the Data or Interest packet.
  * @param {Data|Interest} dataOrInterest The Data or Interest packet to validate,
  * which is copied.
+ * If data is a CertificateV2, then also check if it is revoked by the CRL.
  * @param {function} successCallback On validation success, this calls
  * successCallback(dataOrInterest).
  * @param {function} failureCallback On validation failure, this calls

@@ -153,11 +153,14 @@ ValidationState.prototype.setOutcome = function(outcome)
  * Validator class.
  * @param {CertificateV2} trustedCertificate The certificate that signs the
  * original packet.
+ * @param {CertificateStorage} certificateStorage If not null and the original
+ * packet is a CertificateV2, call certificateStorage.findRevokedCertificate to
+ * check if the original packet is revoked.
  * @return {Promise|SyncPromise} A promise that resolves when the success or
  * failure callback has been called.
  */
 ValidationState.prototype.verifyOriginalPacketPromise_ = function
-  (trustedCertificate)
+  (trustedCertificate, certificateStorage)
 {
   return SyncPromise.reject(new Error
     ("ValidationState.verifyOriginalPacketPromise_ is not implemented"));

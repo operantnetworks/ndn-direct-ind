@@ -101,11 +101,12 @@ InterestValidationState.prototype.addSuccessCallback = function(successCallback)
  * Override to verify the Interest packet given to the constructor.
  * @param {CertificateV2} trustedCertificate The certificate that signs the
  * original packet.
+ * @param {CertificateStorage} certificateStorage This is ignored.
  * @return {Promise|SyncPromise} A promise that resolves when the success or
  * failure callback has been called.
  */
 InterestValidationState.prototype.verifyOriginalPacketPromise_ = function
-  (trustedCertificate)
+  (trustedCertificate, certificateStorage)
 {
   var thisState = this;
 
