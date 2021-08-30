@@ -1,4 +1,4 @@
-NDN-DIRECT-IND (2021-07-23)
+NDN-DIRECT-IND (2021-08-24)
 ---------------------------
 
 Changes
@@ -14,3 +14,5 @@ Changes
 * In TpmPrivateKey: Make the encryption algorithm a member variable.
 * Support X509 certificate format and validation https://github.com/operantnetworks/ndn-direct-ind/pull/22
 * Support X509 CRL format https://github.com/operantnetworks/ndn-direct-ind/pull/24
+* Add X509CrlFetcher and update the Validator to check for revocation https://github.com/operantnetworks/ndn-direct-ind/pull/27
+

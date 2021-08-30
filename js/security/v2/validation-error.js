@@ -1,4 +1,15 @@
 /**
+ * Copyright (C) 2021 Operant Networks, Incorporated.
+ *
+ * This works is based substantially on previous work as listed below:
+ *
+ * Original file: js/security/v2/validation-error.js
+ * Original repository: https://github.com/named-data/ndn-js
+ *
+ * Summary of Changes: Add REVOKED.
+ *
+ * which was originally released under the LGPL license with the following rights:
+ *
  * Copyright (C) 2018-2019 Regents of the University of California.
  * @author: Jeff Thompson <jefft0@remap.ucla.edu>
  * @author: From ndn-cxx security https://github.com/named-data/ndn-cxx/blob/master/ndn-cxx/security/v2/validation-error.cpp
@@ -47,6 +58,7 @@ ValidationError.MALFORMED_CERTIFICATE =       6;
 ValidationError.EXCEEDED_DEPTH_LIMIT =        7;
 ValidationError.INVALID_KEY_LOCATOR =         8;
 ValidationError.POLICY_ERROR =                9;
+ValidationError.REVOKED =                     10;
 ValidationError.IMPLEMENTATION_ERROR =        255;
 // Custom error codes should use >= USER_MIN.
 ValidationError.USER_MIN =                    256;
@@ -93,6 +105,8 @@ ValidationError.prototype.toString = function()
     result = "Key locator violates validation policy";
   else if (this.code_ === ValidationError.POLICY_ERROR)
     result = "Validation policy error";
+  else if (this.code_ === ValidationError.REVOKED)
+    result = "Certificate is revoked";
   else if (this.code_ === ValidationError.IMPLEMENTATION_ERROR)
     result = "Internal implementation error";
   else if (this.code_ >= ValidationError.USER_MIN)

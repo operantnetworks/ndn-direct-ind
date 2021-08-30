@@ -1,4 +1,15 @@
 /**
+ * Copyright (C) 2021 Operant Networks, Incorporated.
+ *
+ * This works is based substantially on previous work as listed below:
+ *
+ * Original file: js/security/v2/validator.js
+ * Original repository: https://github.com/named-data/ndn-js
+ *
+ * Summary of Changes: Check CRL.
+ *
+ * which was originally released under the LGPL license with the following rights:
+ *
  * Copyright (C) 2018-2019 Regents of the University of California.
  * @author: Jeff Thompson <jefft0@remap.ucla.edu>
  * @author: From ndn-cxx security https://github.com/named-data/ndn-cxx/blob/master/ndn-cxx/security/v2/validator.hpp
@@ -217,14 +228,19 @@ Validator.prototype.requestCertificate_ = function(certificateRequest, state)
 
     state.verifyCertificateChainPromise_(certificate)
     .then(function(certificate) {
-      if (certificate != null)
-        return state.verifyOriginalPacketPromise_(certificate);
-      else
-        return SyncPromise.resolve();
-    })
-    .then(function() {
-      for (var i = 0; i < state.certificateChain_.length; ++i)
-        thisValidator.cacheVerifiedCertificate(state.certificateChain_[i]);
+      if (certificate != null) {
+        for (var i = 0; i < state.certificateChain_.length; ++i) {
+          if (!thisValidator.cacheVerifiedCertificate(state.certificateChain_[i])) {
+            state.fail(new ValidationError(ValidationError.REVOKED,
+              "The certificate with serial number " +
+              state.certificateChain_[i].getX509SerialNumber().toHex() +
+              " is revoked: `" + state.certificateChain_[i].getName().toUri() + "`"));
+            return;
+          }
+        }
+
+        return state.verifyOriginalPacketPromise_(certificate, thisValidator);
+      }
     });
 
     return;
