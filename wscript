@@ -211,6 +211,8 @@ def build (bld):
                  "js/security/v2/validation-policy-from-pib.js",
                  "js/security/v2/validation-policy-simple-hierarchy.js",
                  "js/security/v2/validator.js",
+                 "js/security/v2/x509-crl-cache.js",
+                 "js/security/v2/x509-crl-fetcher.js",
                  "js/security/key-chain.js",
                  "js/security/validator-config-error.js",
                  "js/security/validator-config.js",
