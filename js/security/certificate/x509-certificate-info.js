@@ -30,9 +30,10 @@ var ValidityPeriod = require('../../security/validity-period.js').ValidityPeriod
  * There are two forms of the constructor:
  * X509CertificateInfo(encoding) - Create an X509CertificateInfo by decoding an
  * X.509 certificate.
- * X509CertificateInfo(issuerName, alidityPeriod, subjectName, publicKey, signatureValue) -
- * Create an X509CertificateInfo from the given values. This sets the serial
- * number to 0. You can use getEncoding() to get the X.509 certificate.
+ * X509CertificateInfo(issuerName, validityPeriod, subjectName, publicKey, signatureValue, [serialNumber]) -
+ * Create an X509CertificateInfo from the given values. If the optional
+ * serialNumber is omitted, use 0. You can use getEncoding() to get the X.509
+ * certificate.
  * @param {Blob} encoding The encoded X.509 certificate.
  * @param {Name} issuerName The issuer name, which is converted according to
  * makeX509Name(). If the name doesn't start with /x509, then it should
@@ -44,11 +45,15 @@ var ValidityPeriod = require('../../security/validity-period.js').ValidityPeriod
  * @param {Blob} publicKey The bytes of the public key DER.
  * @param {Blob} signatureValue The bytes of the signature value. This assumes the
  * algorithm is RSA with SHA-256.
+ * @param {Blob} serialNumber (optional) The serial number as a Blob with the
+ * bytes of the integer. If omitted use a single byte of 00. The first byte must
+ * be >= 0x80. (Negative serial numbers are not supported.)
  * @throws Error for error decoding the certificate.
  * @constructor
  */
 var X509CertificateInfo = function X509CertificateInfo
-  (issuerName, validityPeriod, subjectName, publicKey, signatureValue)
+  (issuerName, validityPeriod, subjectName, publicKey, signatureValue,
+   serialNumber)
 {
   if (issuerName instanceof Blob) {
     encoding = issuerName;
@@ -142,12 +147,12 @@ var X509CertificateInfo = function X509CertificateInfo
     }
   }
   else {
-    this.serialNumber_ = Blob();
     this.issuerName_ = new Name(issuerName);
     this.validityPeriod_ = new ValidityPeriod(validityPeriod);
     this.subjectName_ = new Name(subjectName);
     this.publicKey_ = publicKey;
     this.signatureValue_ = signatureValue;
+    this.serialNumber_ = (serialNumber instanceof Blob ? serialNumber : new Blob([0]));
     this.crlDistributionUri_ = "";
 
     // We are using certificate extensions, so we must set the version.
@@ -170,7 +175,12 @@ var X509CertificateInfo = function X509CertificateInfo
     //      subjectPublicKeyInfo SubjectPublicKeyInfo
     //      }
     tbsCertificate.addChild(version);
-    tbsCertificate.addChild(new DerNode.DerInteger(0));
+
+    if (this.serialNumber_.size() > 0 && this.serialNumber_.buf()[0] >= 0x80)
+      throw new Error
+        ("X509CertificateInfo: Negative serial numbers are not currently supported");
+    tbsCertificate.addChild(new DerNode.DerInteger(this.serialNumber_.buf()));
+
     tbsCertificate.addChild(algorithmIdentifier);
     tbsCertificate.addChild(X509CertificateInfo.makeX509Name(issuerName, null));
 
