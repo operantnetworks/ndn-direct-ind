@@ -37,7 +37,7 @@ var ValidationError = function ValidationError(code, info)
 
 exports.ValidationError = ValidationError;
 
-ValidationError.NO_ERROR =                    0;
+ValidationError.NO_VALIDATION_ERROR =         0;
 ValidationError.INVALID_SIGNATURE =           1;
 ValidationError.NO_SIGNATURE =                2;
 ValidationError.CANNOT_RETRIEVE_CERTIFICATE = 3;
@@ -73,7 +73,7 @@ ValidationError.prototype.toString = function()
 {
   var result;
 
-  if (this.code_ === ValidationError.NO_ERROR)
+  if (this.code_ === ValidationError.NO_VALIDATION_ERROR)
     result = "No error";
   else if (this.code_ === ValidationError.INVALID_SIGNATURE)
     result = "Invalid signature";
