@@ -37,6 +37,7 @@ var CertificateV2 = require('./certificate-v2.js').CertificateV2; /** @ignore */
 var ValidationError = require('./validation-error.js').ValidationError; /** @ignore */
 var ValidationState = require('./validation-state.js').ValidationState; /** @ignore */
 var VerificationHelpers = require('../verification-helpers.js').VerificationHelpers; /** @ignore */
+var WireFormat = require('../../encoding/wire-format.js').WireFormat; /** @ignore */
 var NdnCommon = require('../../util/ndn-common.js').NdnCommon;
 
 /**
@@ -104,11 +105,14 @@ DataValidationState.prototype.getOriginalData = function() { return this.data_; 
  * Override to verify the Data packet given to the constructor.
  * @param {CertificateV2} trustedCertificate The certificate that signs the
  * original packet.
+ * @param {CertificateStorage} certificateStorage If not null and the original
+ * packet is a CertificateV2, call certificateStorage.findRevokedCertificate to
+ * check if the original packet is revoked.
  * @return {Promise|SyncPromise} A promise that resolves when the success or
  * failure callback has been called.
  */
 DataValidationState.prototype.verifyOriginalPacketPromise_ = function
-  (trustedCertificate)
+  (trustedCertificate, certificateStorage)
 {
   var thisState = this;
 
@@ -116,6 +120,21 @@ DataValidationState.prototype.verifyOriginalPacketPromise_ = function
     (this.data_, trustedCertificate)
   .then(function(verifySuccess) {
     if (verifySuccess) {
+      if (certificateStorage != null && thisState.data_ instanceof CertificateV2) {
+        var originalCertificate = thisState.data_;
+        // The original packet is a certificate. Check if the issuer has revoked it.
+        var revoked = certificateStorage.findRevokedCertificate
+          (originalCertificate.getIssuerName(), originalCertificate.getX509SerialNumber());
+        if (revoked != null) {
+          thisState.fail(new ValidationError(ValidationError.REVOKED,
+            "The CRL from issuer " + originalCertificate.getIssuerName().toUri() +
+            " has revoked serial number " + revoked.getSerialNumber().toHex() +
+            " at time " + WireFormat.toIsoString(revoked.getRevocationDate()) +
+            ". Rejecting certificate " + originalCertificate.getName().toUri()));
+          return SyncPromise.resolve();
+        }
+      }
+
       if (LOG > 3) console.log("OK signature for data `" +
         thisState.data_.getName().toUri() + "`");
       try {
