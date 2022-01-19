@@ -154,7 +154,7 @@ var X509CrlInfo = function X509CrlInfo(encoding)
 
     // For now, ignore the extensions.
   } catch (ex) {
-    throw new Error("X509CrlInfo: Cannot decode the TBSCertificate: " + ex);
+    throw new Error("X509CrlInfo: Cannot decode the TBSCertList: " + ex);
   }
 };
 
